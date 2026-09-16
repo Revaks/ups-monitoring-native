@@ -1,0 +1,32 @@
+# Конфигурация Prometheus (нативный запуск без Docker).
+#
+# Список ИБП задаётся в файле targets.yml (file_sd_configs) рядом с этим файлом —
+# его можно менять на лету, Prometheus сам перечитает его без перезапуска.
+
+global:
+  scrape_interval: 1m
+  scrape_timeout: 30s
+  evaluation_interval: 1m
+
+scrape_configs:
+  - job_name: 'snmp'
+    scrape_interval: 1m
+    scrape_timeout: 30s
+    metrics_path: /snmp
+    params:
+      module: [ups]
+      auth: [public_v2]
+    file_sd_configs:
+      - files:
+          - 'targets.yml'
+        refresh_interval: 30s
+    relabel_configs:
+      # IP устройства из targets.yml -> параметр target для snmp_exporter
+      - source_labels: [__address__]
+        target_label: __param_target
+      # IP устройства -> метка instance (по ней ищем ИБП на дашборде)
+      - source_labels: [__param_target]
+        target_label: instance
+      # Реально опрашивает snmp_exporter (локально)
+      - target_label: __address__
+        replacement: localhost:9116

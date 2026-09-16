@@ -1,0 +1,7 @@
+# Бинарники (скачиваются run.sh автоматически)
+bin/
+
+# Данные (TSDB Prometheus, БД Grafana, логи, pid-файлы)
+data/
+*.log
+*.pid

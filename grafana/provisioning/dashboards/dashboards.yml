@@ -1,0 +1,15 @@
+apiVersion: 1
+
+providers:
+  - name: 'UPS dashboards'
+    orgId: 1
+    folder: ''
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      # Путь подставляется из переменной окружения DASHBOARDS_PATH (задаётся в run.sh)
+      path: ${DASHBOARDS_PATH}
+      foldersFromFilesStructure: false
