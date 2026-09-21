@@ -10,6 +10,7 @@
 
 ```
 ups-monitoring-native/
+├── install.sh        # установщик для сервера (см. ниже)
 ├── run.sh            # скачать бинарники + запустить всё
 ├── stop.sh           # остановить всё
 ├── prometheus.yml    # конфиг Prometheus
@@ -22,7 +23,36 @@ ups-monitoring-native/
 
 `bin/` (бинарники) и `data/` (БД/логи) создаются автоматически и не входят в git.
 
-## Запуск
+## Установка на сервере одной командой
+
+`install.sh` ставит всё сам: раскладывает проект в `/opt/ups-monitoring-native`,
+скачивает бинарники с проверкой sha256, спрашивает IP ИБП, SNMP community и
+пароль Grafana, включает автозапуск через systemd.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/install.sh | sudo bash
+```
+
+Без вопросов, со своими параметрами:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/install.sh \
+  | sudo bash -s -- --yes \
+      --targets '192.168.1.10:UPS-01:Узел №1,192.168.1.11:UPS-02' \
+      --password 'Str0ng-Pass'
+```
+
+| Что                        | Команда                                                          |
+|----------------------------|------------------------------------------------------------------|
+| Все флаги                  | `... \| sudo bash -s -- --help`                                  |
+| Обновить / перенастроить   | запустить ту же команду заново (настройки и данные сохранятся)   |
+| Остановить / запустить     | `systemctl stop ups-monitoring` / `systemctl start ups-monitoring` |
+| Логи                       | `journalctl -u ups-monitoring -n 50` и `/opt/ups-monitoring-native/data/*.log` |
+| Удалить                    | `... \| sudo bash -s -- --uninstall` (с `--purge` — вместе с данными) |
+
+Требуется Linux с systemd, `bash`, `curl`, `tar`; Docker не нужен.
+
+## Запуск вручную (без установщика)
 
 1. Впишите IP своих ИБП в `targets.yml`.
 2. (Опционально) задайте логин/пароль Grafana:
