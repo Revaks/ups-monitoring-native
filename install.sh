@@ -37,12 +37,14 @@ GF_USER=""
 GF_PASSWORD=""
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
+SNMP_SHARDS=""             # число процессов snmp_exporter (пусто = 1)
 ASSUME_YES=0
 SYSTEMD_MODE="auto"        # auto | yes | no
 DO_START=1
 DO_DOWNLOAD=1
 DO_UNINSTALL=0
 DO_PURGE=0
+SERVICE_STARTED=0          # 1, если сервисы были запущены в конце установки
 
 # --- переменные, заполняемые по ходу выполнения ---
 ARCH=""
@@ -279,7 +281,19 @@ banner() {
 #  Остановка предыдущей установки
 # =====================================================================
 
+# 1, если сервис был запущен до установки: тогда в конце его нужно поднять
+# обратно, а если установка не доходит до запуска — предупредить об этом явно.
+UNIT_WAS_ACTIVE=0
+
+service_active() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null
+}
+
 stop_existing() {
+  if service_active; then
+    UNIT_WAS_ACTIVE=1
+  fi
   if [ -f "$UNIT_FILE" ] && command -v systemctl >/dev/null 2>&1; then
     info "останавливаю ранее установленный сервис $SERVICE_NAME..."
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
@@ -289,6 +303,26 @@ stop_existing() {
   fi
   # даём процессам время освободить порты
   sleep 1
+}
+
+# Сервис был остановлен на время установки, но так и не запущен (--no-start,
+# --no-systemd или ошибка на середине). Молча оставлять мониторинг выключенным
+# нельзя — говорим прямо, что делать.
+WARN_LEFT_STOPPED_SHOWN=0
+
+warn_service_left_stopped() {
+  [ "$UNIT_WAS_ACTIVE" = 1 ] || return 0
+  [ "$SERVICE_STARTED" = 1 ] && return 0
+  [ "$WARN_LEFT_STOPPED_SHOWN" = 1 ] && return 0   # не повторять на выходе
+  WARN_LEFT_STOPPED_SHOWN=1
+  printf '\n' >&2
+  warn "СЕРВИС ОСТАНОВЛЕН: $SERVICE_NAME был запущен до установки, но сейчас не работает"
+  if [ -f "$UNIT_FILE" ]; then
+    warn "  запустить: sudo systemctl start $SERVICE_NAME"
+  else
+    warn "  запустить: $INSTALL_DIR/run.sh"
+  fi
+  printf '\n' >&2
 }
 
 # =====================================================================
@@ -733,8 +767,9 @@ EOF
 ensure_env_keys() {
   local f="$INSTALL_DIR/.env" key val cur block="" changed=0
   [ -f "$f" ] || return 0
+  # ${!key:-} — не падать, если переменная вообще не задана (set -u)
   for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID SNMP_SHARDS; do
-    val="${!key}"
+    val="${!key:-}"
     if grep -qE "^[[:space:]]*${key}=" "$f"; then
       [ -n "$val" ] || continue                     # не задавали — оставляем как есть
       cur="$(read_current_env_value "$key")"
@@ -742,6 +777,9 @@ ensure_env_keys() {
       sed -i "s|^[[:space:]]*${key}=.*|${key}=${val}|" "$f"
       changed=1
     else
+      # дописываем только отсутствующие ключи (иначе получились бы дубли строк,
+      # а последняя пустая строка затирала бы уже настроенное значение)
+      [ "$key" = "SNMP_SHARDS" ] && [ -z "$val" ] && val=1
       block="${block}${key}=${val}"$'\n'
       changed=1
     fi
@@ -749,11 +787,8 @@ ensure_env_keys() {
   [ "$changed" = 1 ] || return 0
   if [ -n "$block" ]; then
     {
-      printf '\n# --- Алерты: уведомления в Telegram (добавлено install.sh) ---\n'
-      printf 'TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n' \
-        "${TELEGRAM_BOT_TOKEN:-}" "${TELEGRAM_CHAT_ID:-}"
-      printf '\n# --- Шардинг опроса: сколько процессов snmp_exporter (docs/scaling.md) ---\n'
-      printf 'SNMP_SHARDS=%s\n' "${SNMP_SHARDS:-1}"
+      printf '\n# --- Добавлено install.sh: уведомления об алертах и шардинг опроса ---\n'
+      printf '%s' "$block"
     } >> "$f"
   fi
   chmod 600 "$f"
@@ -1029,12 +1064,17 @@ start_stack() {
   step "Запускаю сервисы"
   if [ "$SYSTEMD" = yes ]; then
     if systemctl restart "$SERVICE_NAME"; then
+      SERVICE_STARTED=1
       ok "сервис $SERVICE_NAME запущен"
     else
       warn "systemctl restart вернул ошибку, смотрите: journalctl -u $SERVICE_NAME -n 50"
     fi
   else
-    "$INSTALL_DIR/run.sh" || warn "run.sh вернул ошибку, смотрите логи в $INSTALL_DIR/data/*.log"
+    if "$INSTALL_DIR/run.sh"; then
+      SERVICE_STARTED=1
+    else
+      warn "run.sh вернул ошибку, смотрите логи в $INSTALL_DIR/data/*.log"
+    fi
   fi
 }
 
@@ -1247,6 +1287,9 @@ do_uninstall() {
 
 cleanup() {
   [ -n "${STAGE_ROOT:-}" ] && rm -rf "$STAGE_ROOT" 2>/dev/null || true
+  # Если установка прервалась после остановки сервиса, не оставляем
+  # мониторинг выключенным молча (например, при ошибке на середине).
+  warn_service_left_stopped 2>/dev/null || true
 }
 
 main() {
@@ -1328,6 +1371,8 @@ main() {
   fi
 
   print_summary
+
+  warn_service_left_stopped
 }
 
 # Запускаем при исполнении (в том числе через `curl | bash`), но не при `source`.
