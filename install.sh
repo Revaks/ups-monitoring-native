@@ -119,9 +119,10 @@ UPS Monitoring (native) — установщик v${INSTALLER_VERSION}
 
 Основное:
   -d, --dir PATH          каталог установки (по умолчанию ${DEFAULT_DIR})
-  -r, --ref REF           ветка или тег репозитория: v1.1.0, v1.0.0, main
-                          (по умолчанию ${DEFAULT_REF}; если --ref не указан при
-                          повторном запуске, остаётся ранее установленная версия)
+  -r, --ref REF           версия: тег (v1.1.1, v1.0.0) или ветка main.
+                          Список версий — CHANGELOG.md.
+                          Если --ref не указан при повторном запуске, остаётся
+                          ранее установленная версия.
   -y, --yes               не задавать вопросов, использовать значения по умолчанию
   -h, --help              эта справка
   -V, --version           версия установщика
@@ -541,9 +542,13 @@ stage_repo() {
   rm -f "$tarball"
   STAGE_DIR="$top"
 
-  for f in run.sh stop.sh status.sh prometheus.yml snmp.yml targets.yml; do
+  # Обязательный минимум, который есть в любой версии проекта.
+  # Остальное (status.sh, targets.yml, docs/, алерты) может отсутствовать
+  # в старых версиях — устанавливаем то, что есть.
+  for f in run.sh stop.sh prometheus.yml snmp.yml; do
     [ -f "$STAGE_DIR/$f" ] || die "в архиве репозитория нет файла $f — изменилась структура проекта?"
   done
+  [ -f "$STAGE_DIR/targets.yml" ] || info "в этой версии нет targets.yml — файл будет создан"
 }
 
 install_files() {
@@ -554,14 +559,20 @@ install_files() {
   for f in run.sh stop.sh status.sh prometheus.yml snmp.yml README.md ROADMAP.md CHANGELOG.md; do
     if [ -f "$STAGE_DIR/$f" ]; then cp -a "$STAGE_DIR/$f" "$INSTALL_DIR/$f"; fi
   done
-  cp -a "$STAGE_DIR/grafana/." "$INSTALL_DIR/grafana/"
+  if [ -d "$STAGE_DIR/grafana" ]; then
+    cp -a "$STAGE_DIR/grafana/." "$INSTALL_DIR/grafana/"
+  fi
   # документация кладётся рядом, чтобы её можно было читать на сервере
   if [ -d "$STAGE_DIR/docs" ]; then
     mkdir -p "$INSTALL_DIR/docs"
     cp -a "$STAGE_DIR/docs/." "$INSTALL_DIR/docs/"
   fi
 
-  chmod +x "$INSTALL_DIR/run.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/status.sh"
+  # chmod только для того, что реально установилось (в старых версиях
+  # status.sh может отсутствовать)
+  for f in run.sh stop.sh status.sh; do
+    if [ -f "$INSTALL_DIR/$f" ]; then chmod +x "$INSTALL_DIR/$f"; fi
+  done
   ok "файлы обновлены"
 }
 
@@ -915,10 +926,12 @@ check_ports() {
 
 install_systemd() {
   step "Ставлю systemd-юнит $SERVICE_NAME"
-  # Type=simple + Restart=on-failure: run.sh --foreground держит три сервиса,
-  # перезапускает упавшие и завершается по сигналу systemd.
-  # StartLimit* — в [Unit] (так требует systemd начиная с v230).
-  cat > "$UNIT_FILE" <<EOF
+
+  if grep -q -- '--foreground' "$INSTALL_DIR/run.sh" 2>/dev/null; then
+    # Новый run.sh умеет режим супервизора: держит три сервиса, перезапускает
+    # упавшие и завершается по сигналу systemd. StartLimit* — в [Unit]
+    # (так требует systemd начиная с v230).
+    cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=UPS monitoring (snmp_exporter + Prometheus + Grafana)
 Documentation=https://github.com/${REPO_SLUG}
@@ -942,6 +955,34 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 EOF
+  else
+    # Старая версия run.sh (до 1.1.0): она только запускает сервисы в фоне.
+    # Такой юнит работает, но не заметит падения сервиса — обновление до
+    # актуальной версии это лечит.
+    warn "run.sh этой версии без режима супервизора: автоперезапуск при падении работать не будет"
+    warn "  (подробности — CHANGELOG.md, версия 1.1.0)"
+    cat > "$UNIT_FILE" <<EOF
+[Unit]
+Description=UPS monitoring (snmp_exporter + Prometheus + Grafana)
+Documentation=https://github.com/${REPO_SLUG}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=${INSTALL_DIR}
+EnvironmentFile=-${INSTALL_DIR}/.env
+ExecStart=${INSTALL_DIR}/run.sh
+ExecStop=${INSTALL_DIR}/stop.sh
+TimeoutStartSec=900
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  fi
+
   chmod 644 "$UNIT_FILE"
   systemctl daemon-reload
   if systemctl enable "$SERVICE_NAME" >/dev/null 2>&1; then
@@ -1007,6 +1048,8 @@ wait_http() {  # $1 = url, $2 = имя, $3 = таймаут в секундах
 # останется незамеченным.
 check_alert_rules() {
   local user pass count
+  # в версиях до 1.1.0 правила алертов не поставлялись
+  [ -d "$INSTALL_DIR/grafana/provisioning/alerting" ] || return 0
   user="$(read_current_env_value GRAFANA_ADMIN_USER)"
   [ -n "$user" ] || user="${GF_USER:-admin}"
   pass="$(read_current_env_value GRAFANA_ADMIN_PASSWORD)"
@@ -1111,14 +1154,18 @@ print_summary() {
 
   printf '  Список ИБП     %s/targets.yml\n' "$INSTALL_DIR" >&2
   printf '  Версия         %s   (другая: install.sh --ref v1.0.0 | --ref main)\n' "$REF" >&2
-  printf '  История версий %s/CHANGELOG.md\n' "$INSTALL_DIR" >&2
-  printf '  Алерты         Grafana -> Alerting -> папка UPS (7 правил)\n' >&2
-  if [ -n "$(read_current_env_value TELEGRAM_BOT_TOKEN)" ] \
-     && [ -n "$(read_current_env_value TELEGRAM_CHAT_ID)" ]; then
-    printf '  Уведомления    Telegram включён\n' >&2
+  printf '  История версий %s/CHANGELOG.md (список версий и что менялось)\n' "$INSTALL_DIR" >&2
+  if [ -d "$INSTALL_DIR/grafana/provisioning/alerting" ]; then
+    printf '  Алерты         Grafana -> Alerting -> папка UPS (7 правил)\n' >&2
+    if [ -n "$(read_current_env_value TELEGRAM_BOT_TOKEN)" ] \
+       && [ -n "$(read_current_env_value TELEGRAM_CHAT_ID)" ]; then
+      printf '  Уведомления    Telegram включён\n' >&2
+    else
+      printf '  Уведомления    выключены (по умолчанию) — алерты видны в Grafana\n' >&2
+      printf '                 включить: TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в %s/.env\n' "$INSTALL_DIR" >&2
+    fi
   else
-    printf '  Уведомления    выключены (по умолчанию) — алерты видны в Grafana\n' >&2
-    printf '                 включить: TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в %s/.env\n' "$INSTALL_DIR" >&2
+    printf '  Алерты         в этой версии нет (появились в 1.1.0)\n' >&2
   fi
   printf '  Логи           %s/data/*.log\n' "$INSTALL_DIR" >&2
   printf '  Обновить       заново запустить install.sh (настройки сохранятся)\n' >&2

@@ -13,6 +13,27 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 Список версий: [Releases](https://github.com/Revaks/ups-monitoring-native/releases)
 и `git tag -l`. Что именно поменялось — ниже.
 
+## [1.1.1] — 2026-09-22
+
+### Исправлено
+
+* **Установщик не мог поставить предыдущую версию.** Он требовал файл
+  `status.sh` (появился только в 1.1.0) и всегда создавал systemd-юнит с
+  `run.sh --foreground`, которого в старых версиях нет. Теперь обязательны
+  только те файлы, что есть в любой версии, а тип юнита выбирается по
+  возможностям `run.sh`: для старых версий — прежняя схема (`Type=oneshot`)
+  с честным предупреждением, что автоперезапуск при падении работать не будет.
+  Проверено установкой v1.0.0 и v1.1.0 текущим установщиком.
+
+После этого откат и возврат работают в обе стороны:
+
+```bash
+# откатиться на предыдущую версию
+... | sudo bash -s -- --yes --ref v1.0.0
+# вернуться на актуальную
+... | sudo bash -s -- --yes --ref v1.1.1
+```
+
 ## [1.1.0] — 2026-09-22
 
 Первый выпуск с алертами, нормальной эксплуатацией и документацией.
@@ -76,5 +97,6 @@ Prometheus + Grafana обычными процессами.
 * `install.sh`: установка на сервер одной командой, проверка sha256, автозапуск
   через systemd, интерактивная настройка и флаги.
 
+[1.1.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.0.0

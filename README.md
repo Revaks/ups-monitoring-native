@@ -65,6 +65,15 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 ... | sudo bash -s -- --yes --ref main
 ```
 
+Если версия настолько старая, что текущий установщик её не понимает (менялась
+структура проекта), возьмите установщик из того же тега — он всегда
+самосогласован:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/v1.0.0/install.sh \
+  | sudo bash -s -- --yes --ref v1.0.0
+```
+
 Что при этом сохраняется: `.env`, `targets.yml` и каталог `data/` (история
 Prometheus и база Grafana). Поэтому откат версии не теряет настройки и данные.
 
