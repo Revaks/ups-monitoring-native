@@ -1269,7 +1269,7 @@ main() {
     remembered="$(head -n 1 "$INSTALL_DIR/.installed-ref" 2>/dev/null | tr -d '[:space:]' || true)"
     if [ -n "$remembered" ]; then
       REF="$remembered"
-      info "версия из прошлой установки: $REF (сменить: --ref v1.1.0 или --ref main)"
+      info "версия из прошлой установки: $REF (сменить: --ref <версия> или --ref main, список — CHANGELOG.md)"
     fi
   fi
 
