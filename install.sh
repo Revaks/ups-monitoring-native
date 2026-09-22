@@ -30,10 +30,13 @@ TTY="/dev/tty"
 # --- параметры (значения по умолчанию) ---
 INSTALL_DIR="$DEFAULT_DIR"
 REF="$DEFAULT_REF"
+REF_GIVEN=0                 # 1, если версию указали явно через --ref
 TARGETS_SPEC=""
 COMMUNITY=""
 GF_USER=""
 GF_PASSWORD=""
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_CHAT_ID=""
 ASSUME_YES=0
 SYSTEMD_MODE="auto"        # auto | yes | no
 DO_START=1
@@ -116,7 +119,9 @@ UPS Monitoring (native) — установщик v${INSTALLER_VERSION}
 
 Основное:
   -d, --dir PATH          каталог установки (по умолчанию ${DEFAULT_DIR})
-  -r, --ref REF           ветка или тег репозитория (по умолчанию ${DEFAULT_REF})
+  -r, --ref REF           ветка или тег репозитория: v1.1.0, v1.0.0, main
+                          (по умолчанию ${DEFAULT_REF}; если --ref не указан при
+                          повторном запуске, остаётся ранее установленная версия)
   -y, --yes               не задавать вопросов, использовать значения по умолчанию
   -h, --help              эта справка
   -V, --version           версия установщика
@@ -128,6 +133,13 @@ UPS Monitoring (native) — установщик v${INSTALLER_VERSION}
   -u, --user NAME         логин администратора Grafana (по умолчанию admin)
   -p, --password PASS     пароль администратора Grafana
                           (если не задан — сгенерируется случайный)
+
+Алерты (необязательно, значения хранятся в .env):
+      --telegram-token T  токен бота Telegram (получить у @BotFather)
+      --telegram-chat ID  id чата/канала Telegram для уведомлений
+                          (для группы/канала — отрицательное число)
+                          Без этих значений правила работают, но уведомления
+                          не отправляются: видны только в Grafana -> Alerting.
 
 Поведение:
       --systemd           всегда ставить systemd-юнит (автозапуск после ребута)
@@ -157,11 +169,13 @@ parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -d|--dir)        [ $# -ge 2 ] || die "для $1 нужен путь"; INSTALL_DIR="$2"; shift 2 ;;
-      -r|--ref)        [ $# -ge 2 ] || die "для $1 нужна ветка или тег"; REF="$2"; shift 2 ;;
+      -r|--ref)        [ $# -ge 2 ] || die "для $1 нужна ветка или тег"; REF="$2"; REF_GIVEN=1; shift 2 ;;
       -t|--targets)    [ $# -ge 2 ] || die "для $1 нужен список"; TARGETS_SPEC="$2"; shift 2 ;;
       -c|--community)  [ $# -ge 2 ] || die "для $1 нужна строка"; COMMUNITY="$2"; shift 2 ;;
       -u|--user)       [ $# -ge 2 ] || die "для $1 нужен логин"; GF_USER="$2"; shift 2 ;;
       -p|--password)   [ $# -ge 2 ] || die "для $1 нужен пароль"; GF_PASSWORD="$2"; shift 2 ;;
+      --telegram-token) [ $# -ge 2 ] || die "для $1 нужен токен бота"; TELEGRAM_BOT_TOKEN="$2"; shift 2 ;;
+      --telegram-chat)  [ $# -ge 2 ] || die "для $1 нужен id чата"; TELEGRAM_CHAT_ID="$2"; shift 2 ;;
       -y|--yes)        ASSUME_YES=1; shift ;;
       --systemd)       SYSTEMD_MODE="yes"; shift ;;
       --no-systemd)    SYSTEMD_MODE="no"; shift ;;
@@ -466,6 +480,8 @@ plan_config() {
     fi
     validate_password "$GF_PASSWORD"
   fi
+
+  validate_telegram "$TELEGRAM_BOT_TOKEN" "$TELEGRAM_CHAT_ID"
 }
 
 validate_password() {
@@ -477,6 +493,26 @@ validate_password() {
     die "в пароле Grafana есть символы, которые нельзя записать в .env и systemd EnvironmentFile.
     Допустимы: латиница, цифры и . _ @ % + = ! : -
     Пример: --password 'Str0ng-P@ss'"
+  fi
+}
+
+# Токен и id чата Telegram попадают в .env, который читается через
+# `set -a; . .env`, поэтому опасные символы (пробелы, кавычки, #, $) недопустимы.
+validate_telegram() {
+  local t="$1" c="$2"
+  if [ -n "$t" ] && ! [[ "$t" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+    die "токен Telegram не похож на настоящий (ожидается вид 123456789:AA...).
+    Получите токен у @BotFather и передайте: --telegram-token '123456789:AA...'"
+  fi
+  if [ -n "$c" ] && ! [[ "$c" =~ ^(-?[0-9]+|@[A-Za-z0-9_]{5,})$ ]]; then
+    die "id чата Telegram должен быть числом (для группы/канала — отрицательным,
+    например -1001234567890) либо @имя_канала."
+  fi
+  if [ -n "$t" ] && [ -z "$c" ]; then
+    warn "задан токен бота, но не задан --telegram-chat: уведомления не уйдут"
+  fi
+  if [ -z "$t" ] && [ -n "$c" ]; then
+    warn "задан --telegram-chat, но не задан токен бота: уведомления не уйдут"
   fi
 }
 
@@ -505,7 +541,7 @@ stage_repo() {
   rm -f "$tarball"
   STAGE_DIR="$top"
 
-  for f in run.sh stop.sh prometheus.yml snmp.yml targets.yml; do
+  for f in run.sh stop.sh status.sh prometheus.yml snmp.yml targets.yml; do
     [ -f "$STAGE_DIR/$f" ] || die "в архиве репозитория нет файла $f — изменилась структура проекта?"
   done
 }
@@ -515,12 +551,17 @@ install_files() {
   step "Раскладываю файлы в $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR/grafana"
 
-  for f in run.sh stop.sh prometheus.yml snmp.yml README.md; do
+  for f in run.sh stop.sh status.sh prometheus.yml snmp.yml README.md ROADMAP.md CHANGELOG.md; do
     if [ -f "$STAGE_DIR/$f" ]; then cp -a "$STAGE_DIR/$f" "$INSTALL_DIR/$f"; fi
   done
   cp -a "$STAGE_DIR/grafana/." "$INSTALL_DIR/grafana/"
+  # документация кладётся рядом, чтобы её можно было читать на сервере
+  if [ -d "$STAGE_DIR/docs" ]; then
+    mkdir -p "$INSTALL_DIR/docs"
+    cp -a "$STAGE_DIR/docs/." "$INSTALL_DIR/docs/"
+  fi
 
-  chmod +x "$INSTALL_DIR/run.sh" "$INSTALL_DIR/stop.sh"
+  chmod +x "$INSTALL_DIR/run.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/status.sh"
   ok "файлы обновлены"
 }
 
@@ -611,6 +652,9 @@ write_targets() {
     printf '#       ups_name: <имя на дашборде>\n'
     printf '#       location: <расположение>\n'
     printf '#\n'
+    printf '# Дополнительно (необязательно): snmp_auth — имя блока auths из snmp.yml\n'
+    printf '# для устройств с другим community или SNMP v3; snmp_module — имя модуля.\n'
+    printf '#\n'
     printf '# Prometheus перечитывает файл каждые 30 секунд, перезапуск не нужен.\n'
     printf '# =====================================================================\n'
     printf '\n'
@@ -645,16 +689,55 @@ write_env() {
   local f="$INSTALL_DIR/.env"
   if [ "$KEEP_ENV" = 1 ]; then
     info ".env: оставляю существующий"
+    # Недостающие ключи (например, Telegram для алертов) дописывает
+    # ensure_env_keys — чтобы обновление старых установок тоже их получило.
     return 0
   fi
   ( umask 077; cat > "$f" <<EOF
-# Создано install.sh $(date +%Y-%m-%d). Логин/пароль администратора Grafana.
+# Создано install.sh $(date +%Y-%m-%d).
 GRAFANA_ADMIN_USER=$GF_USER
 GRAFANA_ADMIN_PASSWORD=$GF_PASSWORD
+
+# --- Алерты: уведомления в Telegram ---
+# TELEGRAM_BOT_TOKEN — токен бота от @BotFather.
+# TELEGRAM_CHAT_ID   — id чата/канала (для группы/канала отрицательный).
+# Пока пусто — правила алертов работают, но уведомления не отправляются.
+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
 EOF
   )
   chmod 600 "$f"
   ok ".env: логин Grafana '$GF_USER'"
+}
+
+# Приводит .env к актуальному виду, не затирая уже сохранённые значения:
+#  - отсутствующие ключи дописывает (обновление старых установок);
+#  - существующие ключи обновляет, только если новое значение задано явно.
+ensure_env_keys() {
+  local f="$INSTALL_DIR/.env" key val cur block="" changed=0
+  [ -f "$f" ] || return 0
+  for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+    val="${!key}"
+    if grep -qE "^[[:space:]]*${key}=" "$f"; then
+      [ -n "$val" ] || continue                     # не задавали — оставляем как есть
+      cur="$(read_current_env_value "$key")"
+      [ "$cur" = "$val" ] && continue
+      sed -i "s|^[[:space:]]*${key}=.*|${key}=${val}|" "$f"
+      changed=1
+    else
+      block="${block}${key}=${val}"$'\n'
+      changed=1
+    fi
+  done
+  [ "$changed" = 1 ] || return 0
+  if [ -n "$block" ]; then
+    {
+      printf '\n# --- Алерты: уведомления в Telegram (добавлено install.sh) ---\n'
+      printf '%s' "$block"
+    } >> "$f"
+  fi
+  chmod 600 "$f"
+  ok ".env: ключи Telegram для алертов обновлены"
 }
 
 # =====================================================================
@@ -832,22 +915,29 @@ check_ports() {
 
 install_systemd() {
   step "Ставлю systemd-юнит $SERVICE_NAME"
+  # Type=simple + Restart=on-failure: run.sh --foreground держит три сервиса,
+  # перезапускает упавшие и завершается по сигналу systemd.
+  # StartLimit* — в [Unit] (так требует systemd начиная с v230).
   cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=UPS monitoring (snmp_exporter + Prometheus + Grafana)
 Documentation=https://github.com/${REPO_SLUG}
+Documentation=file://${INSTALL_DIR}/README.md
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=-${INSTALL_DIR}/.env
-ExecStart=${INSTALL_DIR}/run.sh
-ExecStop=${INSTALL_DIR}/stop.sh
-TimeoutStartSec=900
+ExecStart=${INSTALL_DIR}/run.sh --foreground
+Restart=on-failure
+RestartSec=5
 TimeoutStopSec=60
+KillMode=mixed
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
@@ -859,6 +949,30 @@ EOF
   else
     warn "не удалось включить автозапуск — проверьте: systemctl enable $SERVICE_NAME"
   fi
+}
+
+# Логи сервисов пишутся в data/*.log и не должны расти бесконечно.
+# copytruncate нужен потому, что процессы держат файлы открытыми.
+install_logrotate() {
+  local cfg="/etc/logrotate.d/${SERVICE_NAME}"
+  if [ ! -d /etc/logrotate.d ]; then
+    info "logrotate не установлен — логи в ${INSTALL_DIR}/data/*.log ротируются вручную"
+    return 0
+  fi
+  step "Настраиваю ротацию логов ($cfg)"
+  cat > "$cfg" <<EOF
+${INSTALL_DIR}/data/*.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+  chmod 644 "$cfg"
+  ok "логи в ${INSTALL_DIR}/data/*.log: неделя x 8, с сжатием"
 }
 
 start_stack() {
@@ -888,6 +1002,37 @@ wait_http() {  # $1 = url, $2 = имя, $3 = таймаут в секундах
   return 1
 }
 
+# Проверяет, что Grafana действительно загрузила правила алертов из провижининга:
+# ошибка в YAML не роняет Grafana — правила просто не появятся, и отказ ИБП
+# останется незамеченным.
+check_alert_rules() {
+  local user pass count
+  user="$(read_current_env_value GRAFANA_ADMIN_USER)"
+  [ -n "$user" ] || user="${GF_USER:-admin}"
+  pass="$(read_current_env_value GRAFANA_ADMIN_PASSWORD)"
+  [ -n "$pass" ] || pass="${GF_PASSWORD:-}"
+  if [ -z "$pass" ]; then
+    warn "не проверяю правила алертов: пароль Grafana неизвестен"
+    return 0
+  fi
+  count="$(curl -fsS -u "$user:$pass" --max-time 15 \
+             'http://127.0.0.1:3000/api/v1/provisioning/alert-rules' 2>/dev/null \
+             | grep -o '"uid"' | wc -l)"
+  if [ "${count:-0}" -gt 0 ]; then
+    ok "правила алертов загружены: ${count} шт. (Grafana -> Alerting -> папка UPS)"
+    if [ -n "$(read_current_env_value TELEGRAM_BOT_TOKEN)" ] \
+       && [ -n "$(read_current_env_value TELEGRAM_CHAT_ID)" ]; then
+      ok "уведомления: Telegram включён"
+    else
+      info "уведомления выключены (по умолчанию) — алерты видны только в Grafana"
+      info "  включить: TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в $INSTALL_DIR/.env и перезапустить"
+    fi
+  else
+    warn "правила алертов не найдены — проверьте grafana/provisioning/alerting/rules.yml"
+    warn "  и лог: $INSTALL_DIR/data/grafana.log"
+  fi
+}
+
 health_check() {
   local fails=0 first_ip="" e
   step "Проверяю, что всё поднялось"
@@ -895,6 +1040,8 @@ health_check() {
   wait_http "http://127.0.0.1:9116/" "snmp_exporter" 30 || fails=$((fails + 1))
   wait_http "http://127.0.0.1:9090/-/healthy" "Prometheus" 60 || fails=$((fails + 1))
   wait_http "http://127.0.0.1:3000/api/health" "Grafana" 90 || fails=$((fails + 1))
+
+  check_alert_rules
 
   if [ "${#ENTRIES[@]}" -gt 0 ]; then
     for e in "${ENTRIES[@]}"; do first_ip="${e%%|*}"; break; done
@@ -963,6 +1110,16 @@ print_summary() {
   printf '  (файл %s/.env, доступен только root)\n\n' "$INSTALL_DIR" >&2
 
   printf '  Список ИБП     %s/targets.yml\n' "$INSTALL_DIR" >&2
+  printf '  Версия         %s   (другая: install.sh --ref v1.0.0 | --ref main)\n' "$REF" >&2
+  printf '  История версий %s/CHANGELOG.md\n' "$INSTALL_DIR" >&2
+  printf '  Алерты         Grafana -> Alerting -> папка UPS (7 правил)\n' >&2
+  if [ -n "$(read_current_env_value TELEGRAM_BOT_TOKEN)" ] \
+     && [ -n "$(read_current_env_value TELEGRAM_CHAT_ID)" ]; then
+    printf '  Уведомления    Telegram включён\n' >&2
+  else
+    printf '  Уведомления    выключены (по умолчанию) — алерты видны в Grafana\n' >&2
+    printf '                 включить: TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в %s/.env\n' "$INSTALL_DIR" >&2
+  fi
   printf '  Логи           %s/data/*.log\n' "$INSTALL_DIR" >&2
   printf '  Обновить       заново запустить install.sh (настройки сохранятся)\n' >&2
 
@@ -978,11 +1135,13 @@ print_summary() {
   fi
 
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi '^Status: active'; then
-    printf '\n  %sufw активен%s — при доступе извне откройте порты:\n' "$C_YELLOW" "$C_RESET" >&2
-    printf '    ufw allow from <ваша сеть> to any port 3000,9090 proto tcp\n' >&2
+    printf '\n  %sufw активен%s — для доступа к Grafana извне откройте порт 3000:\n' "$C_YELLOW" "$C_RESET" >&2
+    printf '    ufw allow from <ваша сеть> to any port 3000 proto tcp\n' >&2
+    printf '    (порты 9090 и 9116 наружу открывать не нужно — см. README)\n' >&2
   elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    printf '\n  %sfirewalld активен%s — при доступе извне откройте порты:\n' "$C_YELLOW" "$C_RESET" >&2
-    printf '    firewall-cmd --permanent --add-port=3000/tcp --add-port=9090/tcp && firewall-cmd --reload\n' >&2
+    printf '\n  %sfirewalld активен%s — для доступа к Grafana извне откройте порт 3000:\n' "$C_YELLOW" "$C_RESET" >&2
+    printf '    firewall-cmd --permanent --add-port=3000/tcp && firewall-cmd --reload\n' >&2
+    printf '    (порты 9090 и 9116 наружу открывать не нужно — см. README)\n' >&2
   fi
   printf '\n' >&2
 }
@@ -1006,6 +1165,11 @@ do_uninstall() {
   if [ -x "$INSTALL_DIR/stop.sh" ]; then
     "$INSTALL_DIR/stop.sh" >/dev/null 2>&1 || true
     ok "процессы остановлены"
+  fi
+
+  if [ -f "/etc/logrotate.d/${SERVICE_NAME}" ]; then
+    rm -f "/etc/logrotate.d/${SERVICE_NAME}"
+    ok "правило ротации логов удалено"
   fi
 
   if [ "$DO_PURGE" = 1 ]; then
@@ -1052,6 +1216,16 @@ main() {
     exit 0
   fi
 
+  # Версия, которой обновляемся. Если --ref не указан, а система уже стояла —
+  # остаёмся на той же версии: обновление не «уезжает» на main само по себе.
+  if [ "$REF_GIVEN" = 0 ] && [ -f "$INSTALL_DIR/.installed-ref" ]; then
+    remembered="$(head -n 1 "$INSTALL_DIR/.installed-ref" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [ -n "$remembered" ]; then
+      REF="$remembered"
+      info "версия из прошлой установки: $REF (сменить: --ref v1.1.0 или --ref main)"
+    fi
+  fi
+
   trap cleanup EXIT
   preflight_deps
   detect_arch
@@ -1066,10 +1240,13 @@ main() {
 
   stage_repo
   install_files
+  # запоминаем версию, чтобы при следующем запуске без --ref остаться на ней
+  printf '%s\n' "$REF" > "$INSTALL_DIR/.installed-ref"
   patch_run_sh
   configure_community
   write_targets
   write_env
+  ensure_env_keys
 
   if [ "$DO_DOWNLOAD" = 1 ]; then
     seed_binaries
@@ -1084,6 +1261,8 @@ main() {
   else
     info "systemd не используется — запуск вручную: $INSTALL_DIR/run.sh"
   fi
+
+  install_logrotate
 
   if [ "$DO_START" = 1 ]; then
     start_stack

@@ -8,7 +8,9 @@
 # не требуется.
 #
 # Чтобы поменять community — измените поле community в блоке auths ниже.
-# Для SNMP v3 — добавьте отдельный auth-блок и укажите его в module.auth.
+# Для SNMP v3 — добавьте отдельный auth-блок (пример ниже) и укажите его имя
+# для нужных ИБП в targets.yml в метке snmp_auth: тогда один пул может
+# содержать устройства с разными community/версиями SNMP.
 
 auths:
   public_v2:
@@ -21,6 +23,24 @@ auths:
     password: ""
     priv_password: ""
     context_name: ""
+
+# --- Пример для SNMP v3 (раскомментируйте и подставьте свои значения) ---
+# Имя блока (например dc_v3) указывается для конкретного ИБП в targets.yml
+# в метке snmp_auth — prometheus.yml передаёт её в snmp_exporter как
+# параметр auth (см. relabel_configs -> __param_auth). Так в одном пуле
+# могут сосуществовать устройства с разными community и версиями SNMP.
+# Пароли удобнее не хранить в этом файле: запустите snmp_exporter с флагом
+# --config.expand-env и пишите password: ${SNMP_V3_PASSWORD}
+#
+#  dc_v3:
+#    version: 3
+#    security_level: authPriv
+#    username: upsmon
+#    password: "Str0ng-Auth-Pass"
+#    auth_protocol: SHA
+#    priv_protocol: AES
+#    priv_password: "Str0ng-Priv-Pass"
+#    context_name: ""
 
 modules:
   ups:
@@ -37,7 +57,19 @@ modules:
       - 1.3.6.1.2.1.33.1.4.4.1.3   # upsOutputCurrent
       - 1.3.6.1.2.1.33.1.4.4.1.4   # upsOutputPower
       - 1.3.6.1.2.1.33.1.4.4.1.5   # upsOutputPercentLoad
+      # --- Необязательные OID: идентификация устройства и тревоги ---
+      # Эти данные есть не у всех ИБП, поэтому опрашиваем их обходом (walk),
+      # а не запросом GET. Причина: GET со списком OID, среди которых есть
+      # отсутствующий, возвращает error-status 2 (noSuchName) и ВЕСЬ опрос
+      # устройства заканчивается ошибкой — ИБП пропадает из мониторинга
+      # (up=0). При обходе отсутствующие OID просто не находятся.
+      # Проверено: устройство без upsIdent* и upsAlarmsPresent нормально
+      # опрашивается, а его метрики ups* остаются на месте.
+      - 1.3.6.1.2.1.33.1.1         # upsIdent: производитель, модель, версии, имя
+      - 1.3.6.1.2.1.33.1.3.1       # upsInputLineBads
+      - 1.3.6.1.2.1.33.1.6.1       # upsAlarmsPresent
     get:
+      # --- Батарея, вход и выход: базовый набор, есть у всех устройств ---
       - 1.3.6.1.2.1.33.1.2.1.0     # upsBatteryStatus
       - 1.3.6.1.2.1.33.1.2.2.0     # upsSecondsOnBattery
       - 1.3.6.1.2.1.33.1.2.3.0     # upsEstimatedMinutesRemaining
@@ -48,6 +80,39 @@ modules:
       - 1.3.6.1.2.1.33.1.4.1.0     # upsOutputSource
       - 1.3.6.1.2.1.33.1.4.2.0     # upsOutputFrequency
     metrics:
+      # --- Идентификация устройства ---
+      # Строковые значения отдаются как метрика с текстом в одноимённой метке:
+      #   upsIdentManufacturer{upsIdentManufacturer="APC"} 1
+      # Если ИБП не поддерживает эти OID — метрик просто не будет.
+      - name: upsIdentManufacturer
+        oid: 1.3.6.1.2.1.33.1.1.1.0
+        type: DisplayString
+        help: "Производитель ИБП"
+      - name: upsIdentModel
+        oid: 1.3.6.1.2.1.33.1.1.2.0
+        type: DisplayString
+        help: "Модель ИБП"
+      - name: upsIdentUPSSoftwareVersion
+        oid: 1.3.6.1.2.1.33.1.1.3.0
+        type: DisplayString
+        help: "Версия ПО ИБП"
+      - name: upsIdentAgentSoftwareVersion
+        oid: 1.3.6.1.2.1.33.1.1.4.0
+        type: DisplayString
+        help: "Версия ПО SNMP-карты"
+      - name: upsIdentName
+        oid: 1.3.6.1.2.1.33.1.1.5.0
+        type: DisplayString
+        help: "Имя, заданное в самом ИБП (сравните с ups_name из targets.yml)"
+      # --- Счётчики и тревоги ---
+      - name: upsInputLineBads
+        oid: 1.3.6.1.2.1.33.1.3.1.0
+        type: counter
+        help: "Сколько раз входное питание пропадало (счётчик)"
+      - name: upsAlarmsPresent
+        oid: 1.3.6.1.2.1.33.1.6.1.0
+        type: gauge
+        help: "Число активных тревог ИБП (0 — всё в порядке)"
       # --- Батарея ---
       - name: upsBatteryStatus
         oid: 1.3.6.1.2.1.33.1.2.1.0
@@ -136,6 +201,13 @@ modules:
         oid: 1.3.6.1.2.1.33.1.4.2.0
         type: gauge
         help: "Частота на выходе (герцы)"
+    # --- Параметры опроса (важно для больших пулов) ---
+    # Худшее время одного опроса = timeout x (retries + 1).
+    # Было 5s x 4 = 20 с на недоступный ИБП: при отказе целого узла (упал
+    # коммутатор, пропало питание) десятки таких опросов идут параллельно,
+    # упираются в scrape_timeout (30s) из prometheus.yml и «съедают» соседей.
+    # Стало 2s x 2 = 4 с. Для медленных сетей/VPN увеличьте timeout до 5s,
+    # но помните про формулу выше.
     max_repetitions: 25
-    retries: 3
-    timeout: 5s
+    retries: 1
+    timeout: 2s

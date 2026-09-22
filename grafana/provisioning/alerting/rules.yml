@@ -1,0 +1,309 @@
+# =====================================================================
+#  Правила алертов (Grafana unified alerting)
+# =====================================================================
+#  Главное правило — ups-unavailable: без него недоступный ИБП «исчезает»
+#  из мониторинга молча, потому что все метрики ups* у него пропадают
+#  (остаётся только up == 0), и панели показывают «No data».
+#
+#  noDataState: OK — если устройство убрали из targets.yml, алерт не
+#  зависает в состоянии «нет данных». Факт недоступности — это up == 0,
+#  а не отсутствие данных.
+#
+#  Дашборд правил: Grafana -> Alerting -> Alert rules -> папка UPS.
+# =====================================================================
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: UPS
+    folder: UPS
+    interval: 1m
+    rules:
+      # -----------------------------------------------------------------
+      # 1. ИБП не отвечает по SNMP (главный алерт P0)
+      # -----------------------------------------------------------------
+      - uid: ups-unavailable
+        title: ИБП недоступен по SNMP
+        condition: C
+        for: 3m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: не отвечает по SNMP'
+          description: 'Адрес {{ $labels.ups_ip }}: up == 0 дольше 3 минут. Проверьте питание ИБП, сеть и доступность UDP/161.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'up{job="snmp"}'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [1], type: lt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}
+
+      # -----------------------------------------------------------------
+      # 2. ИБП перешёл на батарею (пропало питание)
+      # -----------------------------------------------------------------
+      - uid: ups-on-battery
+        title: ИБП работает от батареи
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: перешёл на батарею'
+          description: 'upsOutputSource == 5 (battery). Остаток: {{ $values.A }} мин.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'upsOutputSource == 5'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}
+
+      # -----------------------------------------------------------------
+      # 3. Низкий заряд / разряженная батарея
+      # -----------------------------------------------------------------
+      - uid: ups-battery-low
+        title: Низкий заряд батареи ИБП
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: низкий заряд батареи'
+          description: 'upsBatteryStatus >= 3 (batteryLow/batteryDepleted). Батарею пора менять или проверять.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'upsBatteryStatus >= 3'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}
+
+      # -----------------------------------------------------------------
+      # 4. Мало времени автономной работы (только когда уже на батарее)
+      # -----------------------------------------------------------------
+      - uid: ups-runtime-low
+        title: Мало времени автономной работы ИБП
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: осталось менее 10 минут'
+          description: 'upsEstimatedMinutesRemaining < 10 при работе от батареи — готовьте корректное выключение.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: '(upsEstimatedMinutesRemaining < 10) and (upsOutputSource == 5)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [10], type: lt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}
+
+      # -----------------------------------------------------------------
+      # 5. Перегрузка выхода
+      # -----------------------------------------------------------------
+      - uid: ups-overload
+        title: Высокая нагрузка на ИБП
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: нагрузка выше 85%'
+          description: 'upsOutputPercentLoad > 85 дольше 10 минут — есть риск перегрузки при переходе на батарею.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'upsOutputPercentLoad > 85'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [85], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}
+
+      # -----------------------------------------------------------------
+      # 6. Перегрев батареи
+      # -----------------------------------------------------------------
+      - uid: ups-battery-hot
+        title: Перегрев батареи ИБП
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: температура батареи выше 40 °C'
+          description: 'upsBatteryTemperature > 40 — проверьте вентиляцию и состояние батарей.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'upsBatteryTemperature > 40'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [40], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}
+
+      # -----------------------------------------------------------------
+      # 7. Опрос стал медленным — сигнал, что пул пора делить на
+      #    несколько snmp_exporter (см. README, раздел о масштабировании)
+      # -----------------------------------------------------------------
+      - uid: ups-poll-slow
+        title: Опрос ИБП стал медленным
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'ИБП {{ $labels.instance }}: опрос по SNMP дольше 10 с'
+          description: 'snmp_scrape_duration_seconds > 10 — растёт нагрузка на snmp_exporter, проверьте сеть и число устройств.'
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'snmp_scrape_duration_seconds > 10'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [10], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              refId: C
+              type: threshold
+              settings: {}

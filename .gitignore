@@ -5,3 +5,15 @@ bin/
 data/
 *.log
 *.pid
+
+# Секреты: пароль Grafana, токен Telegram, пароли SNMP v3
+.env
+.env.local
+
+# Файл установщика: какая версия (тег) установлена на этом сервере
+.installed-ref
+
+# Генерируется run.sh из *.yml.tpl (подстановка секретов из .env).
+# Создаются только когда включены уведомления, т.е. заданы TELEGRAM_*.
+grafana/provisioning/alerting/contact-points.yml
+grafana/provisioning/alerting/policies.yml

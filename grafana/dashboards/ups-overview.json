@@ -20,10 +20,115 @@
   "links": [],
   "panels": [
     {
+      "id": 9,
+      "type": "stat",
+      "title": "Доступность ИБП (SNMP)",
+      "description": "up = 1 — ИБП отвечает по SNMP, up = 0 — не отвечает. У недоступного ИБП пропадают все метрики ups*, поэтому именно по этой панели (и по алерту «ИБП недоступен по SNMP») видно отказ.",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "noValue": "нет данных",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "НЕДОСТУПЕН", "color": "red", "index": 0 },
+                "1": { "text": "OK", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "up{job=\"snmp\", instance=~\"$instance\"}",
+          "legendFormat": "{{ups_name}} {{instance}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "state-timeline",
+      "title": "История доступности ИБП",
+      "description": "Когда ИБП пропадал из опроса (up = 0). Помогает отличить разовый таймаут от устойчивого отказа.",
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "noValue": "нет данных",
+          "custom": {
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "spanNulls": false,
+            "insertNulls": false,
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "НЕДОСТУПЕН", "color": "red", "index": 0 },
+                "1": { "text": "OK", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "up{job=\"snmp\", instance=~\"$instance\"}",
+          "legendFormat": "{{ups_name}} {{instance}}",
+          "instant": false,
+          "range": true
+        }
+      ]
+    },
+    {
       "id": 1,
       "type": "gauge",
       "title": "Заряд батареи",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -65,7 +170,7 @@
       "id": 2,
       "type": "gauge",
       "title": "Входное напряжение",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -107,7 +212,7 @@
       "id": 3,
       "type": "stat",
       "title": "Остаток работы",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -147,7 +252,7 @@
       "id": 4,
       "type": "gauge",
       "title": "Нагрузка на ИБП",
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -189,7 +294,7 @@
       "id": 8,
       "type": "gauge",
       "title": "Выходное напряжение",
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -231,7 +336,7 @@
       "id": 5,
       "type": "stat",
       "title": "Статус ИБП",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -281,7 +386,7 @@
       "id": 6,
       "type": "gauge",
       "title": "Температура ИБП",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -320,10 +425,247 @@
       ]
     },
     {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Заряд батареи — динамика",
+      "description": "Как менялся заряд за последние сутки. Быстрое падение без нагрузки — повод проверить батарею.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 22 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsEstimatedChargeRemaining{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Нагрузка — динамика",
+      "description": "Загрузка выхода за сутки. Ступенька вверх — подключили новое оборудование.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 22 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsOutputPercentLoad{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Температура батареи — динамика",
+      "description": "Рост температуры ускоряет износ батарей. Тревога настроена на 40 °C (docs/alerts.md).",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 22 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsBatteryTemperature{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Входное напряжение — динамика",
+      "description": "Провалы и просадки входной сети. Если напряжение прыгает — ИБП будет чаще переходить на батарею.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 30 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsInputVoltage{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Выходное напряжение — динамика",
+      "description": "Что ИБП отдаёт оборудованию. Отклонение от нормы — повод разбираться с ИБП или нагрузкой.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 30 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsOutputVoltage{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Остаток автономной работы — динамика",
+      "description": "Сколько минут ИБП продержит нагрузку. Резкие падения — повод проверить батареи и нагрузку.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 30 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "m",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsEstimatedMinutesRemaining{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "state-timeline",
+      "title": "Источник питания: когда ИБП работал от батареи",
+      "description": "Красные полосы — работа от батареи (upsOutputSource = 5). Помогает связать отключения с журналами оборудования.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 38 },
+      "timeFrom": "now-24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "spanNulls": false,
+            "insertNulls": false,
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": { "text": "другое", "color": "purple", "index": 0 },
+                "2": { "text": "нет источника", "color": "gray", "index": 1 },
+                "3": { "text": "от сети", "color": "green", "index": 2 },
+                "4": { "text": "байпас", "color": "yellow", "index": 3 },
+                "5": { "text": "ОТ БАТАРЕИ", "color": "red", "index": 4 },
+                "6": { "text": "booster", "color": "blue", "index": 5 },
+                "7": { "text": "reducer", "color": "blue", "index": 6 },
+                "8": { "text": "низкий заряд", "color": "red", "index": 7 },
+                "9": { "text": "на байпасе", "color": "orange", "index": 8 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "upsOutputSource{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
       "id": 7,
       "type": "table",
       "title": "Сводка по всем ИБП",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 44 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -350,7 +692,9 @@
                   { "type": "value", "options": { "upsOutputPercentLoad": { "text": "Нагрузка" } } },
                   { "type": "value", "options": { "upsOutputSource": { "text": "Статус" } } },
                   { "type": "value", "options": { "upsBatteryTemperature": { "text": "Температура" } } },
-                  { "type": "value", "options": { "upsEstimatedMinutesRemaining": { "text": "Остаток (мин)" } } }
+                  { "type": "value", "options": { "upsEstimatedMinutesRemaining": { "text": "Остаток (мин)" } } },
+                  { "type": "value", "options": { "upsAlarmsPresent": { "text": "Тревоги ИБП" } } },
+                  { "type": "value", "options": { "up": { "text": "Доступность (1 = ок)" } } }
                 ]
               }
             ]
@@ -365,7 +709,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "refId": "A",
-          "expr": "{__name__=~\"upsEstimatedChargeRemaining|upsOutputPercentLoad|upsOutputSource|upsBatteryTemperature|upsEstimatedMinutesRemaining\", instance=~\"$instance\"}",
+          "expr": "{__name__=~\"upsEstimatedChargeRemaining|upsOutputPercentLoad|upsOutputSource|upsBatteryTemperature|upsEstimatedMinutesRemaining|upsAlarmsPresent|up\", instance=~\"$instance\"}",
           "legendFormat": "__auto",
           "instant": true,
           "range": false,
@@ -386,6 +730,7 @@
             "renameByName": {
               "__name__": "Параметр",
               "instance": "ИБП",
+              "ups_ip": "IP-адрес",
               "ups_name": "Имя",
               "location": "Расположение",
               "Value": "Значение"
@@ -402,11 +747,12 @@
     "list": [
       {
         "name": "instance",
-        "label": "ИБП (IP)",
+        "label": "ИБП",
+        "description": "Имя из targets.yml (ups_name); если имя не задано — IP-адрес устройства",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(upsEstimatedChargeRemaining, instance)",
-        "definition": "label_values(upsEstimatedChargeRemaining, instance)",
+        "query": "label_values(up{job=\"snmp\"}, instance)",
+        "definition": "label_values(up{job=\"snmp\"}, instance)",
         "refresh": 2,
         "sort": 1,
         "multi": true,
@@ -417,10 +763,10 @@
       }
     ]
   },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "ИБП — обзор",
   "uid": "ups-overview",
-  "version": 1
+  "version": 3
 }

@@ -14,6 +14,9 @@ scrape_configs:
     scrape_timeout: 30s
     metrics_path: /snmp
     params:
+      # Значения по умолчанию для всего пула.
+      # Их можно переопределить для отдельного ИБП метками snmp_module /
+      # snmp_auth в targets.yml (см. relabel_configs ниже).
       module: [ups]
       auth: [public_v2]
     file_sd_configs:
@@ -21,12 +24,33 @@ scrape_configs:
           - 'targets.yml'
         refresh_interval: 30s
     relabel_configs:
-      # IP устройства из targets.yml -> параметр target для snmp_exporter
+      # Адрес устройства из targets.yml -> параметр target для snmp_exporter
       - source_labels: [__address__]
         target_label: __param_target
-      # IP устройства -> метка instance (по ней ищем ИБП на дашборде)
+      # Адрес устройства всегда в отдельной метке ups_ip: по ней видно,
+      # куда именно ходить, даже когда instance — это имя ИБП.
       - source_labels: [__param_target]
+        target_label: ups_ip
+      # instance = IP, если в targets.yml не задано ups_name...
+      - source_labels: [ups_ip]
         target_label: instance
-      # Реально опрашивает snmp_exporter (локально)
+        regex: (.+)
+      # ...и имя устройства, если задано (задавайте уникальные имена!).
+      # Так на дашборде и в алертах видно «UPS-DC1», а не «10.0.0.5»,
+      # и история не теряется при смене IP.
+      - source_labels: [ups_name]
+        target_label: instance
+        regex: (.+)
+      # Необязательные метки ИБП из targets.yml: разные community / SNMP v3
+      # и разные модули в одном пуле. Если метки нет — правило не срабатывает
+      # и остаётся значение по умолчанию из params выше.
+      - source_labels: [snmp_auth]
+        target_label: __param_auth
+        regex: (.+)
+      - source_labels: [snmp_module]
+        target_label: __param_module
+        regex: (.+)
+      # Реально опрашивает snmp_exporter (локально).
+      # Если меняете SNMP_EXPORTER_PORT в .env — поправьте и здесь.
       - target_label: __address__
         replacement: localhost:9116
