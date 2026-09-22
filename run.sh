@@ -108,14 +108,22 @@ info() { printf '[i] %s\n' "$*"; }
 step() { printf '[+] %s\n' "$*"; }
 
 # Живой ли процесс и тот ли это процесс (защита от переиспользования PID).
+# Живой ли процесс и тот ли это процесс (защита от переиспользования PID).
+# Порядок проверки важен: если сервисы запущены от root, а скрипт запущен
+# обычным пользователем, kill -0 вернёт «нет прав» — хотя процесс работает.
+# Поэтому сначала смотрим /proc (доступен всем), а kill -0 оставляем как
+# запасной вариант для систем без procfs.
 process_alive() {  # $1=pid $2=ожидаемое имя процесса (необязательно)
   local pid="$1" want="${2:-}" comm=""
   [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  [ -n "$want" ] || return 0
-  [ -r "/proc/$pid/comm" ] || return 0
-  comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
-  [ -z "$comm" ] || [ "${comm%%:*}" = "$want" ]
+  if [ -r "/proc/$pid/comm" ]; then
+    comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+    if [ -n "$want" ] && [ -n "$comm" ] && [ "${comm%%:*}" != "$want" ]; then
+      return 1                       # PID переиспользован другим процессом
+    fi
+    return 0
+  fi
+  kill -0 "$pid" 2>/dev/null
 }
 
 # Ждём, пока сервис начнёт отвечать по HTTP.

@@ -40,7 +40,15 @@ else
   FROM_NET="нет (только $LISTEN_ADDR)"
 fi
 
-alive() { kill -0 "$1" 2>/dev/null; }
+# Процесс жив? Обычная kill -0 не работает, если сервисы запущены от root,
+# а status.sh запущен обычным пользователем (нет прав послать сигнал, хотя
+# процесс работает). Поэтому дополнительно смотрим /proc — он доступен всем.
+alive() {  # $1 = pid
+  [ -n "$1" ] || return 1
+  kill -0 "$1" 2>/dev/null && return 0
+  [ -d "/proc/$1" ] && return 0
+  return 1
+}
 
 check_service() {  # $1=слот $2=порт $3=url для проверки
   local name="$1" port="$2" url="$3" pid state http

@@ -13,6 +13,19 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 Список версий: [Releases](https://github.com/Revaks/ups-monitoring-native/releases)
 и `git tag -l`. Что именно поменялось — ниже.
 
+## [1.2.1] — 2026-09-22
+
+### Исправлено
+
+* **Скрипты врали про остановленные сервисы, если запущены не от root.**
+  `status.sh`, `stop.sh` и `run.sh` определяли живость процесса через
+  `kill -0`, а он не может послать сигнал чужому (root-овскому) процессу и
+  возвращает ошибку — хотя сервис работает. В результате `./status.sh` без
+  root показывал «ОСТАНОВЛЕН» при живом стеке, а `./stop.sh` — «не запущен».
+  Теперь признак жизни берётся из `/proc/<pid>` (доступен всем), `kill -0`
+  остаётся запасным вариантом для систем без procfs, а защита от
+  переиспользования PID (сверка имени процесса) сохранена.
+
 ## [1.2.0] — 2026-09-22
 
 ### Добавлено
@@ -145,6 +158,7 @@ Prometheus + Grafana обычными процессами.
 * `install.sh`: установка на сервер одной командой, проверка sha256, автозапуск
   через systemd, интерактивная настройка и флаги.
 
+[1.2.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.2.0
 [1.1.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.0

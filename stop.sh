@@ -38,15 +38,20 @@ done
 say() { [ "$QUIET" = 1 ] || printf '[+] %s\n' "$*"; }
 
 # $1=pid $2=ожидаемое имя процесса — защита от убийства чужого процесса
-# с переиспользованным PID.
+# с переиспользованным PID. /proc проверяем первым: kill -0 не работает, когда
+# сервисы запущены от root, а stop.sh запущен обычным пользователем (нет прав
+# послать сигнал), хотя процессы живы.
 process_alive() {
   local pid="$1" want="${2:-}" comm=""
   [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  [ -n "$want" ] || return 0
-  [ -r "/proc/$pid/comm" ] || return 0
-  comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
-  [ -z "$comm" ] || [ "${comm%%:*}" = "$want" ]
+  if [ -r "/proc/$pid/comm" ]; then
+    comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+    if [ -n "$want" ] && [ -n "$comm" ] && [ "${comm%%:*}" != "$want" ]; then
+      return 1
+    fi
+    return 0
+  fi
+  kill -0 "$pid" 2>/dev/null
 }
 
 # Процессы этого каталога (на случай потерянного pid-файла). $1 — имя процесса
