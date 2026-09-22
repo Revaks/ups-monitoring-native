@@ -25,6 +25,12 @@ LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0}"
 SNMP_EXPORTER_PORT="${SNMP_EXPORTER_PORT:-9116}"
 PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
 GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+SNMP_SHARDS="${SNMP_SHARDS:-1}"
+case "$SNMP_SHARDS" in ''|*[!0-9]*) SNMP_SHARDS=1 ;; esac
+[ "$SNMP_SHARDS" -ge 1 ] || SNMP_SHARDS=1
+
+# Слот шарда -> его порт
+shard_port() { printf '%s' "$((SNMP_EXPORTER_PORT + $1))"; }
 
 if [ "$LISTEN_ADDR" = "0.0.0.0" ]; then
   HOST="localhost"
@@ -36,7 +42,7 @@ fi
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
-check_service() {  # $1=имя $2=порт $3=url для проверки
+check_service() {  # $1=слот $2=порт $3=url для проверки
   local name="$1" port="$2" url="$3" pid state http
   pid="$(cat "$DATA_DIR/$name.pid" 2>/dev/null || true)"
   if [ -n "$pid" ] && alive "$pid"; then
@@ -55,9 +61,38 @@ check_service() {  # $1=имя $2=порт $3=url для проверки
 echo "UPS Monitoring — состояние ($DIR)"
 echo
 echo "Сервисы:"
-check_service snmp_exporter "$SNMP_EXPORTER_PORT" "http://127.0.0.1:${SNMP_EXPORTER_PORT}/"
+if [ "$SNMP_SHARDS" = 1 ]; then
+  check_service snmp_exporter "$(shard_port 0)" "http://127.0.0.1:$(shard_port 0)/"
+else
+  i=0
+  while [ "$i" -lt "$SNMP_SHARDS" ]; do
+    if [ "$i" = 0 ]; then slot="snmp_exporter"; else slot="snmp_exporter-$i"; fi
+    check_service "$slot" "$(shard_port "$i")" "http://127.0.0.1:$(shard_port "$i")/"
+    i=$((i + 1))
+  done
+fi
 check_service prometheus    "$PROMETHEUS_PORT"    "http://127.0.0.1:${PROMETHEUS_PORT}/-/healthy"
 check_service grafana       "$GRAFANA_PORT"       "http://127.0.0.1:${GRAFANA_PORT}/api/health"
+
+# Сколько ИБП попало на каждый шард (из Prometheus) — заодно проверка,
+# что шардинг реально распределяет, а не гонит всё в первый процесс.
+if [ "$SNMP_SHARDS" -gt 1 ]; then
+  targets_json="$(curl -fsS --max-time 5 "http://127.0.0.1:${PROMETHEUS_PORT}/api/v1/targets" 2>/dev/null || true)"
+  if [ -n "$targets_json" ]; then
+    dist=""
+    i=0
+    while [ "$i" -lt "$SNMP_SHARDS" ]; do
+      p="$(shard_port "$i")"
+      # именно scrapeUrl (в цели есть ещё globalUrl с тем же портом)
+      n="$(printf '%s' "$targets_json" | grep -o "scrapeUrl\":\"[^\"]*:$p/snmp" | wc -l | tr -d ' ')"
+      dist="${dist}${n}:${p} "
+      i=$((i + 1))
+    done
+    printf '  %-14s ИБП по шардам (штук:порт): %s\n' "распределение" "$dist"
+  else
+    printf '  %-14s нет данных (Prometheus не ответил)\n' "распределение"
+  fi
+fi
 
 echo
 echo "Список ИБП ($DIR/targets.yml):"
@@ -100,6 +135,19 @@ if curl -fsS --max-time 5 "http://127.0.0.1:${PROMETHEUS_PORT}/api/v1/status/fla
   ret="$(curl -fsS --max-time 5 "http://127.0.0.1:${PROMETHEUS_PORT}/api/v1/status/flags" 2>/dev/null \
         | sed -n 's/.*"storage.tsdb.retention.time":"\([^"]*\)".*/\1/p')"
   echo "  хранение истории Prometheus: ${ret:-по умолчанию}"
+fi
+
+# Каким конфигом реально работает Prometheus: run.sh собирает рабочую копию
+# из prometheus.yml, подставляя адреса экспортёров и правила шардинга.
+if [ -f "$DATA_DIR/prometheus.yml" ]; then
+  if grep -q 'сгенерировано run.sh' "$DATA_DIR/prometheus.yml" 2>/dev/null; then
+    echo "  конфиг Prometheus: data/prometheus.yml (собран run.sh из prometheus.yml)"
+  else
+    echo "  конфиг Prometheus: data/prometheus.yml"
+  fi
+  echo "  шардов экспортёра: $SNMP_SHARDS   (SNMP_SHARDS в .env, docs/scaling.md)"
+else
+  echo "  конфиг Prometheus: prometheus.yml (рабочая копия ещё не собрана)"
 fi
 
 echo

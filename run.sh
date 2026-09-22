@@ -134,21 +134,155 @@ wait_http() {  # $1=url $2=имя $3=таймаут в секундах
 }
 
 check_ports_busy() {  # предупреждаем, если порты заняты чужими процессами
-  local port
+  local port slot busy=0
   if ! command -v ss >/dev/null 2>&1; then return 0; fi
-  for port in "$SNMP_EXPORTER_PORT" "$PROMETHEUS_PORT" "$GRAFANA_PORT"; do
+  # если жив хоть один наш процесс — порты заняты нами, это нормально
+  while IFS= read -r slot; do
+    if process_alive "$(read_pid "$slot")" "$(service_comm "$slot")"; then busy=1; break; fi
+  done <<EOF
+$(service_list)
+EOF
+  [ "$busy" = 0 ] || return 0
+  while IFS= read -r port; do
     if ss -ltn 2>/dev/null | awk 'NR>1 {print $4}' | grep -qE "[:.]${port}\$"; then
-      if ! process_alive "$(read_pid snmp_exporter)" "snmp_exporter" \
-         && ! process_alive "$(read_pid prometheus)" "prometheus" \
-         && ! process_alive "$(read_pid grafana)" "grafana"; then
-        warn "порт $port занят другим процессом — сервис на нём не поднимется"
-      fi
+      warn "порт $port занят другим процессом — сервис на нём не поднимется"
     fi
-  done
+  done <<EOF
+$(all_ports)
+EOF
 }
 
 read_pid() {  # $1=имя сервиса
   cat "$DATA_DIR/$1.pid" 2>/dev/null || true
+}
+
+# =====================================================================
+#  Шардинг опроса: SNMP_SHARDS процессов snmp_exporter
+# =====================================================================
+# Один экспортёр справляется с пулом до сотен устройств. Если устройств
+# больше (или опрос не успевает за интервал), экспортёры можно размножить:
+# Prometheus раскладывает ИБП по шардам правилом hashmod — распределение
+# детерминированное (устройство всегда попадает в свой шард), поэтому
+# история не «прыгает». Подробности и расчёт — docs/scaling.md.
+
+SNMP_SHARDS="${SNMP_SHARDS:-1}"
+case "$SNMP_SHARDS" in
+  ''|*[!0-9]*)
+    warn "SNMP_SHARDS='$SNMP_SHARDS' — не число, беру 1"
+    SNMP_SHARDS=1 ;;
+esac
+if [ "$SNMP_SHARDS" -lt 1 ]; then SNMP_SHARDS=1; fi
+if [ "$SNMP_SHARDS" -gt 8 ]; then
+  warn "SNMP_SHARDS=$SNMP_SHARDS — максимум 8, беру 8"
+  SNMP_SHARDS=8
+fi
+
+# Порт шарда с номером $1 (нумерация с нуля).
+shard_port() { printf '%s' "$((SNMP_EXPORTER_PORT + $1))"; }
+
+# Все порты стека — для проверки занятости.
+all_ports() {
+  local i
+  for i in $(seq 0 $((SNMP_SHARDS - 1))); do shard_port "$i"; printf '\n'; done
+  printf '%s\n%s\n' "$PROMETHEUS_PORT" "$GRAFANA_PORT"
+}
+
+# Слоты сервисов: snmp_exporter, snmp_exporter-1, ... prometheus, grafana.
+service_list() {
+  local i
+  printf 'snmp_exporter\n'
+  i=1
+  while [ "$i" -lt "$SNMP_SHARDS" ]; do
+    printf 'snmp_exporter-%s\n' "$i"
+    i=$((i + 1))
+  done
+  printf 'prometheus\ngrafana\n'
+}
+
+# Имя процесса (comm в /proc) для слота: у всех шардов это snmp_exporter.
+service_comm() {  # $1 = слот
+  case "$1" in
+    snmp_exporter*) printf 'snmp_exporter' ;;
+    prometheus)     printf 'prometheus' ;;
+    grafana)        printf 'grafana' ;;
+    *)              printf '%s' "$1" ;;
+  esac
+}
+
+# Номер шарда по имени слота: snmp_exporter -> 0, snmp_exporter-2 -> 2.
+shard_index() {  # $1 = слот
+  case "$1" in
+    snmp_exporter)   printf '0' ;;
+    snmp_exporter-*) printf '%s' "${1#snmp_exporter-}" ;;
+    *)               printf '0' ;;
+  esac
+}
+
+# Куда Prometheus ходит за метриками: 127.0.0.1, если экспортёр слушает
+# 0.0.0.0 (обычный случай), иначе — конкретный адрес из LISTEN_ADDR.
+exporter_host() {
+  if [ "$LISTEN_ADDR" = "0.0.0.0" ]; then printf '127.0.0.1'; else printf '%s' "$LISTEN_ADDR"; fi
+}
+
+# Рабочая копия конфига Prometheus: в блок между маркерами подставляется
+# один адрес экспортёра (SNMP_SHARDS=1) или правила hashmod (SNMP_SHARDS>1).
+# Исходник — prometheus.yml в каталоге проекта, правки в нём сохраняются.
+PROM_CONFIG="$DATA_DIR/prometheus.yml"
+
+render_prometheus_config() {
+  local src="$DIR/prometheus.yml" dst="$PROM_CONFIG" host
+  host="$(exporter_host)"
+  if [ ! -f "$src" ]; then
+    warn "нет $src — Prometheus не запустится"
+    return 1
+  fi
+  if ! grep -q '>>> sharding' "$src"; then
+    warn "в prometheus.yml нет блока шардинга (маркеров) — беру файл как есть"
+    warn "  шардинг работать не будет: обновите prometheus.yml из репозитория"
+    cp -f "$src" "$dst" 2>/dev/null || return 1
+    return 0
+  fi
+
+  awk -v host="$host" -v base="$SNMP_EXPORTER_PORT" -v n="$SNMP_SHARDS" -v dir="$DIR" '
+    # Абсолютные пути к файлам-спискам: рабочая копия конфига лежит в data/,
+    # а Prometheus считает относительные пути от каталога конфига.
+    function fix(   q, pat, out, i) {
+      q = sprintf("%c", 39)
+      pat = q "targets.yml" q
+      out = ""
+      while ((i = index($0, pat)) > 0) {        # без gsub: не нужно экранировать
+        out = out substr($0, 1, i - 1) q dir "/targets.yml" q
+        $0 = substr($0, i + length(pat))
+      }
+      return out $0
+    }
+    function gen(   i, q) {
+      q = sprintf("%c", 39)                    # одинарная кавычка для regex
+      print "      # >>> сгенерировано run.sh: SNMP_SHARDS = " n " >>>"
+      if (n > 1) {
+        print "      - source_labels: [__address__]"
+        print "        target_label: __tmp_shard"
+        print "        action: hashmod"
+        print "        modulus: " n
+        for (i = 0; i < n; i++) {
+          print "      - source_labels: [__tmp_shard]"
+          print "        regex: " q i q
+          print "        replacement: " host ":" (base + i)
+          print "        target_label: __address__"
+        }
+      } else {
+        print "      - target_label: __address__"
+        print "        replacement: " host ":" base
+      }
+      print "      # <<< сгенерировано run.sh <<<"
+    }
+    />>> sharding/ { print; gen(); skip = 1; next }
+    /<<< sharding/ { skip = 0; print; next }
+    !skip { print fix() }
+  ' "$src" >"$dst" || return 1
+
+  [ -s "$dst" ] || { warn "не удалось собрать $dst"; return 1; }
+  return 0
 }
 
 # =====================================================================
@@ -182,10 +316,17 @@ fi
 #  Проверки конфигов
 # =====================================================================
 
-# Порт snmp_exporter должен совпадать с тем, куда Prometheus шлёт запросы.
-if ! grep -qE "replacement:[[:space:]]*(localhost|127\.0\.0\.1):${SNMP_EXPORTER_PORT}\$" "$DIR/prometheus.yml"; then
-  warn "в prometheus.yml адрес snmp_exporter не localhost:${SNMP_EXPORTER_PORT}"
-  warn "  поправьте в prometheus.yml: replacement: localhost:${SNMP_EXPORTER_PORT}"
+# Рабочая конфигурация Prometheus собирается из prometheus.yml: в блок между
+# маркерами подставляется адрес экспортёра (и правила шардинга, если нужно).
+if render_prometheus_config; then
+  if [ "$SNMP_SHARDS" = 1 ]; then
+    info "конфиг Prometheus: $PROM_CONFIG (snmp_exporter $(exporter_host):$(shard_port 0))"
+  else
+    info "конфиг Prometheus: $PROM_CONFIG (шардов: $SNMP_SHARDS, порты $(shard_port 0)-$(shard_port $((SNMP_SHARDS - 1))))"
+  fi
+else
+  warn "не удалось собрать $PROM_CONFIG — Prometheus будет запущен с $DIR/prometheus.yml"
+  PROM_CONFIG="$DIR/prometheus.yml"
 fi
 
 # =====================================================================
@@ -263,18 +404,23 @@ export GF_SERVER_HTTP_PORT="$GRAFANA_PORT"
 #  Запуск и остановка сервисов
 # =====================================================================
 
-start_snmp_exporter() {
+start_snmp_exporter() {  # $1 = слот: snmp_exporter | snmp_exporter-N
+  local slot="${1:-snmp_exporter}"
+  local port pidfile logfile
+  port="$(shard_port "$(shard_index "$slot")")"
+  pidfile="$DATA_DIR/$slot.pid"
+  logfile="$DATA_DIR/$slot.log"
   nohup "$SNMP_DIR/snmp_exporter" \
     --config.file="$DIR/snmp.yml" \
     --config.expand-environment-variables \
-    --web.listen-address="${LISTEN_ADDR}:${SNMP_EXPORTER_PORT}" \
-    >>"$DATA_DIR/snmp_exporter.log" 2>&1 &
-  echo $! >"$DATA_DIR/snmp_exporter.pid"
+    --web.listen-address="${LISTEN_ADDR}:${port}" \
+    >>"$logfile" 2>&1 &
+  echo $! >"$pidfile"
 }
 
 start_prometheus() {
   local args=(
-    "--config.file=$DIR/prometheus.yml"
+    "--config.file=$PROM_CONFIG"
     "--storage.tsdb.path=$DATA_DIR/prometheus"
     "--web.listen-address=${LISTEN_ADDR}:${PROMETHEUS_PORT}"
     "--storage.tsdb.retention.time=$RETENTION_TIME"
@@ -289,25 +435,43 @@ start_grafana() {
   echo $! >"$DATA_DIR/grafana.pid"
 }
 
-start_service() {  # $1 = имя сервиса
+start_service() {  # $1 = слот сервиса
+  local idx
   case "$1" in
-    snmp_exporter) step "Запускаю snmp_exporter (${LISTEN_ADDR}:${SNMP_EXPORTER_PORT})..."; start_snmp_exporter ;;
-    prometheus)    step "Запускаю Prometheus (${LISTEN_ADDR}:${PROMETHEUS_PORT})..."; start_prometheus ;;
-    grafana)       step "Запускаю Grafana (${LISTEN_ADDR}:${GRAFANA_PORT})..."; start_grafana ;;
+    snmp_exporter|snmp_exporter-*)
+      idx="$(shard_index "$1")"
+      step "Запускаю snmp_exporter #$idx (${LISTEN_ADDR}:$(shard_port "$idx"))..."
+      start_snmp_exporter "$1" ;;
+    prometheus) step "Запускаю Prometheus (${LISTEN_ADDR}:${PROMETHEUS_PORT})..."; start_prometheus ;;
+    grafana)    step "Запускаю Grafana (${LISTEN_ADDR}:${GRAFANA_PORT})..."; start_grafana ;;
     *) warn "неизвестный сервис: $1"; return 1 ;;
   esac
 }
 
 health_check() {
-  local fails=0
+  local fails=0 slot idx=0
   step "Проверяю, что сервисы отвечают"
-  wait_http "http://127.0.0.1:${SNMP_EXPORTER_PORT}/" "snmp_exporter" 20 || fails=$((fails + 1))
+  if [ "$SNMP_SHARDS" = 1 ]; then
+    wait_http "http://127.0.0.1:$(shard_port 0)/" "snmp_exporter" 20 || fails=$((fails + 1))
+  else
+    while IFS= read -r slot; do
+      case "$slot" in
+        snmp_exporter*)
+          wait_http "http://127.0.0.1:$(shard_port "$(shard_index "$slot")")/" \
+                    "snmp_exporter #$idx" 20 || fails=$((fails + 1))
+          idx=$((idx + 1)) ;;
+      esac
+    done <<EOF
+$(service_list)
+EOF
+  fi
   wait_http "http://127.0.0.1:${PROMETHEUS_PORT}/-/healthy" "Prometheus" 40 || fails=$((fails + 1))
   wait_http "http://127.0.0.1:${GRAFANA_PORT}/api/health" "Grafana" 60 || fails=$((fails + 1))
   if [ "$fails" -gt 0 ]; then
     warn "часть сервисов не поднялась. Посмотрите логи:"
-    warn "  tail -n 30 $DATA_DIR/snmp_exporter.log $DATA_DIR/prometheus.log $DATA_DIR/grafana.log"
-    warn "  занятые порты: ss -ltnp | grep -E ':(${SNMP_EXPORTER_PORT}|${PROMETHEUS_PORT}|${GRAFANA_PORT})\\b'"
+    warn "  tail -n 30 $DATA_DIR/*.log"
+    warn "  занятые порты: ss -ltnp | grep -E ':($(all_ports | tr '
+' '|' | sed 's/|$//'))\$'"
     return 1
   fi
   return 0
@@ -320,6 +484,10 @@ print_summary() {
     "$(host_addr)" "$GRAFANA_PORT" "${GRAFANA_ADMIN_USER:-admin}"
   printf '  Prometheus     http://%s:%s\n' "$(host_addr)" "$PROMETHEUS_PORT"
   printf '  snmp_exporter  http://%s:%s\n' "$(host_addr)" "$SNMP_EXPORTER_PORT"
+  if [ "$SNMP_SHARDS" != 1 ]; then
+    printf '                 шардов: %s (порты %s-%s), ИБП делятся автоматически (hashmod)\n' \
+      "$SNMP_SHARDS" "$(shard_port 0)" "$(shard_port $((SNMP_SHARDS - 1)))"
+  fi
   echo
   echo "  Дашборд:    Grafana -> «ИБП — обзор»"
   echo "  Алерты:     Grafana -> Alerting -> Alert rules (папка UPS)"
@@ -383,24 +551,30 @@ if [ "$FOREGROUND" = 1 ]; then
   }
   trap on_signal TERM INT
 
-  for svc in snmp_exporter prometheus grafana; do start_service "$svc"; done
+  while IFS= read -r svc; do start_service "$svc"; done <<EOF
+$(service_list)
+EOF
   health_check || warn "сервисы не поднялись — работаю дальше, перезапущу при падении"
 
   while :; do
     wait -n || true
-    for svc in snmp_exporter prometheus grafana; do
+    while IFS= read -r svc; do
       pid="$(read_pid "$svc")"
-      if ! process_alive "$pid" "$svc"; then
+      if ! process_alive "$pid" "$(service_comm "$svc")"; then
         warn "$svc остановился (pid ${pid:-нет}) — перезапускаю через ${RESTART_DELAY}s"
         sleep "$RESTART_DELAY"
         start_service "$svc"
       fi
-    done
+    done <<EOF
+$(service_list)
+EOF
   done
 fi
 
 # Обычный режим: запускаем и выходим, процессы остаются работать в фоне.
-for svc in snmp_exporter prometheus grafana; do start_service "$svc"; done
+while IFS= read -r svc; do start_service "$svc"; done <<EOF
+$(service_list)
+EOF
 
 if health_check; then
   print_summary

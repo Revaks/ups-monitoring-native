@@ -65,7 +65,7 @@ ss -ltnp | grep -E ':(3000|9090|9116)\b'
 ```bash
 # ufw
 sudo ufw deny 9090/tcp
-sudo ufw deny 9116/tcp
+sudo ufw deny 9116/tcp          # и 9117, 9118… если включён шардинг (SNMP_SHARDS)
 sudo ufw allow from 10.0.0.0/24 to any port 3000 proto tcp   # Grafana — только своей сети
 
 # firewalld

@@ -49,13 +49,37 @@ process_alive() {
   [ -z "$comm" ] || [ "${comm%%:*}" = "$want" ]
 }
 
-# Процессы этого каталога (на случай потерянного pid-файла).
-pids_by_path() {  # $1 = имя сервиса
+# Процессы этого каталога (на случай потерянного pid-файла). $1 — имя процесса
+# (snmp_exporter/prometheus/grafana): у всех шардов экспортёра оно одно и то же.
+pids_by_path() {  # $1 = имя процесса
   pgrep -f "^${DIR}/bin/.*/${1}( |$)" 2>/dev/null || true
 }
 
-stop_one() {  # $1 = имя сервиса
+# Имя процесса для слота: snmp_exporter-2 -> snmp_exporter.
+service_comm() {  # $1 = слот
+  case "$1" in
+    snmp_exporter*) printf 'snmp_exporter' ;;
+    prometheus)     printf 'prometheus' ;;
+    grafana)        printf 'grafana' ;;
+    *)              printf '%s' "$1" ;;
+  esac
+}
+
+# Слоты, которые нужно остановить: grafana, prometheus и все шарды экспортёра
+# (по pid-файлам — чтобы остановить и то, что запущено с другим SNMP_SHARDS).
+stop_slots() {
+  local f
+  printf 'grafana\nprometheus\nsnmp_exporter\n'
+  for f in "$DATA_DIR"/snmp_exporter-*.pid; do
+    [ -e "$f" ] || continue
+    f="${f##*/}"
+    printf '%s\n' "${f%.pid}"
+  done | sort -u -r
+}
+
+stop_one() {  # $1 = слот
   local name="$1"
+  local comm="$(service_comm "$1")"
   local pidfile="$DATA_DIR/$1.pid"
   local pid="" waited=0
 
@@ -66,13 +90,13 @@ stop_one() {  # $1 = имя сервиса
     pid=""
   fi
 
-  if [ -n "$pid" ] && ! process_alive "$pid" "$name"; then
+  if [ -n "$pid" ] && ! process_alive "$pid" "$comm"; then
     say "$name: уже не работает"
     pid=""
   fi
 
   if [ -z "$pid" ]; then
-    pid="$(pids_by_path "$name" | head -n 1)"
+    pid="$(pids_by_path "$comm" | head -n 1)"
     [ -n "$pid" ] || { say "$name: не запущен"; return 0; }
     say "$name: найден без pid-файла (pid $pid)"
   fi
@@ -80,12 +104,12 @@ stop_one() {  # $1 = имя сервиса
   say "останавливаю $name (pid $pid)..."
   kill "$pid" 2>/dev/null || true
 
-  while process_alive "$pid" "$name" && [ "$waited" -lt "$TIMEOUT" ]; do
+  while process_alive "$pid" "$comm" && [ "$waited" -lt "$TIMEOUT" ]; do
     sleep 1
     waited=$((waited + 1))
   done
 
-  if process_alive "$pid" "$name"; then
+  if process_alive "$pid" "$comm"; then
     printf '! %s не завершился за %ss — завершаю принудительно (SIGKILL)\n' "$name" "$TIMEOUT" >&2
     kill -9 "$pid" 2>/dev/null || true
     sleep 1
@@ -127,9 +151,11 @@ stop_supervisor() {
 
 stop_supervisor
 
-for svc in grafana prometheus snmp_exporter; do
-  stop_one "$svc"
-done
+while IFS= read -r slot; do
+  stop_one "$slot"
+done <<EOF
+$(stop_slots)
+EOF
 
 say "остановлено"
 exit 0

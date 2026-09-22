@@ -13,6 +13,41 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 Список версий: [Releases](https://github.com/Revaks/ups-monitoring-native/releases)
 и `git tag -l`. Что именно поменялось — ниже.
 
+## [1.2.0] — 2026-09-22
+
+### Добавлено
+
+* **Шардинг опроса (`SNMP_SHARDS`)**: в `.env` задаётся число процессов
+  `snmp_exporter` (1..8), `run.sh` запускает их на портах
+  `SNMP_EXPORTER_PORT`…`+N-1`, а Prometheus раскладывает ИБП между ними
+  правилом `hashmod` — автоматически и детерминированно (устройство всегда
+  попадает в свой шард). Раньше это требовалось делать руками правкой
+  `prometheus.yml` и отдельным systemd-юнитом.
+* **Рабочая конфигурация Prometheus** `data/prometheus.yml`: собирается при
+  каждом запуске из `prometheus.yml` — подставляет адреса процессов
+  экспортёра, правила шардинга и абсолютный путь к `targets.yml`.
+* `status.sh` показывает шарды и распределение ИБП по ним
+  (`распределение ИБП по шардам (штук:порт): 62:9116 58:9117`), а также какой
+  конфиг реально использует Prometheus. У каждого шарда свой лог
+  `data/snmp_exporter-N.log`.
+
+### Изменено
+
+* Смена `SNMP_EXPORTER_PORT` больше не требует правки `prometheus.yml` — порт
+  подставляется автоматически, предупреждение из `run.sh` убрано.
+* `run.sh` (`--foreground`) следит за всеми шардами: упавший перезапускается
+  через `RESTART_DELAY`, `stop.sh` гасит все, включая процессы, оставшиеся
+  после уменьшения `SNMP_SHARDS`.
+* `install.sh` добавляет `SNMP_SHARDS` в `.env` (и в новые, и в существующие
+  установки).
+
+### Проверено
+
+Стенд из 8 эмуляторов ИБП: `SNMP_SHARDS=1` — все цели на одном порту;
+`=2` — распределение 2/6; `=3` — 3/4/1; во всех режимах `up=1` у всех ИБП,
+падение шарда приводит к перезапуску, `stop.sh` освобождает все порты,
+нечисловое значение `SNMP_SHARDS` откатывается к 1 с предупреждением.
+
 ## [1.1.1] — 2026-09-22
 
 ### Исправлено
@@ -97,6 +132,7 @@ Prometheus + Grafana обычными процессами.
 * `install.sh`: установка на сервер одной командой, проверка sha256, автозапуск
   через systemd, интерактивная настройка и флаги.
 
+[1.2.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.2.0
 [1.1.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.0.0

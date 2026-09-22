@@ -50,7 +50,15 @@ scrape_configs:
       - source_labels: [snmp_module]
         target_label: __param_module
         regex: (.+)
-      # Реально опрашивает snmp_exporter (локально).
-      # Если меняете SNMP_EXPORTER_PORT в .env — поправьте и здесь.
+      # Кто реально опрашивает ИБП — snmp_exporter на этом же сервере.
+      #
+      # Блок между маркерами run.sh переписывает при каждом запуске:
+      #   SNMP_SHARDS = 1 (по умолчанию) — один адрес, порт из SNMP_EXPORTER_PORT;
+      #   SNMP_SHARDS > 1 — правила hashmod, которые раскладывают ИБП по
+      #   нескольким процессам snmp_exporter (порты SNMP_EXPORTER_PORT..+N-1).
+      # Готовая конфигурация кладётся рядом с данными: data/prometheus.yml
+      # (см. docs/scaling.md). Правьте этот файл, а не сгенерированный.
+      # >>> sharding: начало (переписывается run.sh) >>>
       - target_label: __address__
         replacement: localhost:9116
+      # <<< sharding: конец <<<

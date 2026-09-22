@@ -715,6 +715,12 @@ GRAFANA_ADMIN_PASSWORD=$GF_PASSWORD
 # Пока пусто — правила алертов работают, но уведомления не отправляются.
 TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
+
+# --- Сколько процессов snmp_exporter (шардинг опроса) ---
+# 1 — один процесс на порту SNMP_EXPORTER_PORT (обычный случай);
+# 2 и больше — несколько процессов, ИБП делятся между ними автоматически.
+# Подробности и расчёт: docs/scaling.md
+SNMP_SHARDS=1
 EOF
   )
   chmod 600 "$f"
@@ -727,7 +733,7 @@ EOF
 ensure_env_keys() {
   local f="$INSTALL_DIR/.env" key val cur block="" changed=0
   [ -f "$f" ] || return 0
-  for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+  for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID SNMP_SHARDS; do
     val="${!key}"
     if grep -qE "^[[:space:]]*${key}=" "$f"; then
       [ -n "$val" ] || continue                     # не задавали — оставляем как есть
@@ -744,11 +750,14 @@ ensure_env_keys() {
   if [ -n "$block" ]; then
     {
       printf '\n# --- Алерты: уведомления в Telegram (добавлено install.sh) ---\n'
-      printf '%s' "$block"
+      printf 'TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n' \
+        "${TELEGRAM_BOT_TOKEN:-}" "${TELEGRAM_CHAT_ID:-}"
+      printf '\n# --- Шардинг опроса: сколько процессов snmp_exporter (docs/scaling.md) ---\n'
+      printf 'SNMP_SHARDS=%s\n' "${SNMP_SHARDS:-1}"
     } >> "$f"
   fi
   chmod 600 "$f"
-  ok ".env: ключи Telegram для алертов обновлены"
+  ok ".env: ключи Telegram и шардинга обновлены"
 }
 
 # =====================================================================

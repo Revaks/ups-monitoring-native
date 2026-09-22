@@ -44,14 +44,20 @@
 | `data/grafana.log` | Grafana: старт, провижининг, алерты, ошибки |
 | `data/prometheus.log` | Prometheus: старт, запись блоков, ошибки опроса |
 | `data/snmp_exporter.log` | snmp_exporter: **каждая неудачная попытка опроса** |
+| `data/snmp_exporter-N.log` | то же для шарда N (когда `SNMP_SHARDS > 1`) |
 | `journalctl -u ups-monitoring` | только сообщения супервизора `run.sh` |
 
 ```bash
 tail -f /opt/ups-monitoring-native/data/*.log      # наблюдать всё сразу
 
 # кто не отвечает и почему
-grep 'Error scraping' /opt/ups-monitoring-native/data/snmp_exporter.log | tail -20
+grep 'Error scraping' /opt/ups-monitoring-native/data/snmp_exporter*.log | tail -20
 ```
+
+Рабочая конфигурация Prometheus — `data/prometheus.yml`: она собирается при
+каждом запуске из `prometheus.yml` (подставляются адреса процессов
+`snmp_exporter` и правила шардинга). Правки в неё вносить бессмысленно — они
+исчезнут при следующем запуске; правьте исходный `prometheus.yml`.
 
 Ротация логов настроена автоматически (`/etc/logrotate.d/ups-monitoring`):
 неделя на файл, 8 архивов, сжатие. Проверить:
