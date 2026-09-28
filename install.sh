@@ -37,6 +37,8 @@ GF_USER=""
 GF_PASSWORD=""
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
+# читается через ${!key} в ensure_env_keys() — shellcheck этого не видит
+# shellcheck disable=SC2034
 SNMP_SHARDS=""             # число процессов snmp_exporter (пусто = 1)
 ASSUME_YES=0
 SYSTEMD_MODE="auto"        # auto | yes | no

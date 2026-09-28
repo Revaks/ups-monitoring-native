@@ -93,7 +93,8 @@ GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 RETENTION_TIME="${RETENTION_TIME:-1y}"
 RETENTION_SIZE="${RETENTION_SIZE:-}"
 RESTART_DELAY="${RESTART_DELAY:-5}"     # пауза перед перезапуском упавшего сервиса
-STOP_TIMEOUT=20                          # сколько секунд ждать завершения при остановке
+# Таймаут остановки живёт в stop.sh (--timeout, по умолчанию 20 с): run.sh его не
+# передаёт, чтобы связка скриптов работала и со старыми версиями stop.sh.
 
 SNMP_DIR="$BIN_DIR/snmp_exporter-$SNMP_VER.$ARCH"
 PROM_DIR="$BIN_DIR/prometheus-$PROM_VER.$ARCH"

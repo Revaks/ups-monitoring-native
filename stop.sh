@@ -84,7 +84,8 @@ stop_slots() {
 
 stop_one() {  # $1 = слот
   local name="$1"
-  local comm="$(service_comm "$1")"
+  local comm
+  comm="$(service_comm "$1")"
   local pidfile="$DATA_DIR/$1.pid"
   local pid="" waited=0
 
