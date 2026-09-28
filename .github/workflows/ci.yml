@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Синтаксис bash
+        run: |
+          for f in install.sh run.sh stop.sh; do
+            bash -n "$f"
+            echo "bash -n $f: OK"
+          done
+
+      - name: shellcheck
+        run: shellcheck --severity=warning install.sh run.sh stop.sh
+
+      - name: JSON дашборда Grafana
+        run: |
+          jq -e . grafana/dashboards/ups-overview.json > /dev/null
+          echo "dashboard JSON OK"
+
+      - name: YAML (конфиги и provisioning)
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 -c 'import sys, yaml; [yaml.safe_load(open(f, encoding="utf-8")) for f in sys.argv[1:]]' \
+            prometheus.yml \
+            targets.yml \
+            snmp.yml \
+            grafana/provisioning/datasources/datasource.yml \
+            grafana/provisioning/dashboards/dashboards.yml
+          echo "YAML OK"
+
+      - name: promtool check config
+        run: |
+          PROM_VER="$(sed -n 's/^PROM_VER="\([^"]*\)".*/\1/p' run.sh | head -n 1)"
+          echo "Prometheus $PROM_VER"
+          curl -fsSL --retry 3 -o /tmp/prometheus.tar.gz \
+            "https://github.com/prometheus/prometheus/releases/download/v$PROM_VER/prometheus-$PROM_VER.linux-amd64.tar.gz"
+          tar -xzf /tmp/prometheus.tar.gz -C /tmp
+          /tmp/prometheus-"$PROM_VER".linux-amd64/promtool check config prometheus.yml
+
+      - name: PromQL из дашборда Grafana
+        run: |
+          PROM_VER="$(sed -n 's/^PROM_VER="\([^"]*\)".*/\1/p' run.sh | head -n 1)"
+          python3 - <<'PY'
+          import json, pathlib, re
+          exprs = []
+          for path in sorted(pathlib.Path('grafana/dashboards').glob('*.json')):
+              def walk(items):
+                  for panel in items:
+                      for target in panel.get('targets', []):
+                          if target.get('expr'):
+                              exprs.append(target['expr'])
+                      walk(panel.get('panels', []))
+              walk(json.loads(path.read_text(encoding='utf-8'))['panels'])
+          # переменные Grafana -> значения, чтобы выражение стало валидным PromQL
+          uniq = sorted({re.sub(r'\s+', ' ', e).replace('$ups', 'UPS-01')
+                         .replace('$instance', '192.168.1.10') for e in exprs})
+          lines = ['groups:', '  - name: dashboard', '    rules:']
+          for i, expr in enumerate(uniq):
+              lines += [f'      - record: check_{i:03d}', f"        expr: '{expr}'"]
+          pathlib.Path('/tmp/dashboard-rules.yml').write_text('\n'.join(lines) + '\n',
+                                                              encoding='utf-8')
+          print(f'выражений в дашбордах: {len(uniq)}')
+          PY
+          /tmp/prometheus-"$PROM_VER".linux-amd64/promtool check rules /tmp/dashboard-rules.yml
+
+      - name: Загрузка snmp.yml экспортёром
+        run: |
+          SNMP_VER="$(sed -n 's/^SNMP_VER="\([^"]*\)".*/\1/p' run.sh | head -n 1)"
+          echo "snmp_exporter $SNMP_VER"
+          curl -fsSL --retry 3 -o /tmp/snmp_exporter.tar.gz \
+            "https://github.com/prometheus/snmp_exporter/releases/download/v$SNMP_VER/snmp_exporter-$SNMP_VER.linux-amd64.tar.gz"
+          tar -xzf /tmp/snmp_exporter.tar.gz -C /tmp
+          # порт 0 — случайный свободный, чтобы не мешать другим процессам раннера
+          timeout 5 /tmp/snmp_exporter-"$SNMP_VER".linux-amd64/snmp_exporter \
+            --config.file=snmp.yml --web.listen-address=127.0.0.1:0 > /tmp/snmp_exporter.log 2>&1 || true
+          cat /tmp/snmp_exporter.log
+          grep -q 'Starting snmp_exporter' /tmp/snmp_exporter.log
+          if grep -qiE 'level=error|Error loading config' /tmp/snmp_exporter.log; then
+            echo "::error::snmp_exporter не принял snmp.yml"
+            exit 1
+          fi
+          echo "snmp.yml: экспортёр загрузил конфиг"
