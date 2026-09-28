@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 Список версий: [Releases](https://github.com/Revaks/ups-monitoring-native/releases)
 и `git tag -l`. Что именно поменялось — ниже.
 
-## [1.3.0] — не выпущено
+## [1.3.0] — 2026-09-29
 
 ### Добавлено
 
