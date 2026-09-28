@@ -153,6 +153,34 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 `run.sh` на сервере (например, добавляли `--web.listen-address`), перенесите
 правку в репозиторий — иначе она потеряется при обновлении.
 
+## Откат
+
+Та же команда с тегом нужной версии (список — в [CHANGELOG.md](../CHANGELOG.md),
+подробнее — «Версии, обновление и откат» в README):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/install.sh \
+  | sudo bash -s -- --yes --ref v1.2.1
+```
+
+Данные при откате не теряются: `.env` (пароль Grafana, токен Telegram), `targets.yml`
+и каталог `data/` (история Prometheus и база Grafana) не перезаписываются — каталог
+установки удаляется только в режиме `--uninstall --purge`, а обновляются лишь
+скрипты, конфиги, дашборд, правила алертов и `docs/`. Дашборд и правила алертов —
+файлы провижининга без собственного состояния, поэтому смена версии в обе стороны
+не требует миграций; на сервере до 1.2.0 новый дашборд работает, но без колонки
+IP и без панелей идентификации (см. [docs/dashboard.md](dashboard.md)).
+
+Отдельно откатить только дашборд, не меняя версию, тоже можно — это обычный файл:
+
+```bash
+# из клона репозитория: вернуть дашборд конкретной версии
+git show v1.2.1:grafana/dashboards/ups-overview.json \
+  | sudo tee /opt/ups-monitoring-native/grafana/dashboards/ups-overview.json >/dev/null
+```
+
+Grafana перечитает файл за ~30 секунд, перезапуск не нужен.
+
 ## Удаление
 
 ```bash
