@@ -9,6 +9,7 @@
 #  Для systemd:          ./run.sh --foreground
 #                        (супервизор: перезапускает упавшие сервисы и
 #                         ждёт сигнала, пока его не остановят)
+#  Проверка размеров:    ./run.sh --rotate-now   (обрезать логи и выйти)
 #  Справка:              ./run.sh --help
 #
 #  Настройки читаются из файла .env рядом со скриптом (его создаёт install.sh):
@@ -17,6 +18,8 @@
 #    LISTEN_ADDR                                 — 0.0.0.0 (по умолчанию) или 127.0.0.1
 #    SNMP_EXPORTER_PORT / PROMETHEUS_PORT / GRAFANA_PORT
 #    RETENTION_TIME / RETENTION_SIZE             — сколько хранить историю
+#    DATA_DIR / LOG_DIR                          — какие каталоги на каких дисках
+#    LOG_MAX_SIZE / LOG_KEEP_PERCENT             — ротация логов по размеру
 #  Подробности: docs/configuration.md
 # =====================================================================
 set -euo pipefail
@@ -32,13 +35,16 @@ UPS Monitoring (native) — запуск стека snmp_exporter + Prometheus +
   ./run.sh                 запустить всё в фоне (обычный режим)
   ./run.sh --foreground    запустить супервизором: держит процессы и заново
                            поднимает упавшие (так запускает systemd)
+  ./run.sh --rotate-now    один раз обрезать разросшиеся логи и выйти
+                           (пригодится из cron или systemd-таймера)
   ./run.sh --help          эта справка
 
 Что делает:
   1. скачивает бинарники в bin/ (если их нет);
   2. подставляет секреты из .env в провижининг алертов;
   3. запускает snmp_exporter, Prometheus, Grafana;
-  4. проверяет, что каждый сервис отвечает по HTTP.
+  4. поднимает фоновый ротатор логов по размеру;
+  5. проверяет, что каждый сервис отвечает по HTTP.
 
 Настройки (из .env рядом со скриптом или переменными окружения):
   LISTEN_ADDR=127.0.0.1        слушать только локально (по умолчанию 0.0.0.0)
@@ -48,15 +54,27 @@ UPS Monitoring (native) — запуск стека snmp_exporter + Prometheus +
   RETENTION_TIME=1y            сколько хранить историю Prometheus
   RETENTION_SIZE=               ограничение по объёму (например 10GB), пусто — нет
 
+Каталоги и логи (каждый можно положить на свой диск):
+  DATA_DIR=/mnt/disk1/ups-monitoring      история Prometheus, БД Grafana, pid-файлы
+                                          (по умолчанию ./data)
+  LOG_DIR=/mnt/disk2/ups-monitoring/logs  логи сервисов (по умолчанию — как DATA_DIR)
+  LOG_MAX_SIZE=10M             предел размера одного лога; 0 — не ограничивать
+  LOG_KEEP_PERCENT=10          сколько процентов хвоста оставить при обрезке
+  LOG_CHECK_INTERVAL=10        как часто ротатор проверяет размеры, секунды
+                               (минимум 5; реже — дешевле, но больше «перелёт»)
+
 Остановить:  ./stop.sh        Состояние: ./status.sh
 Документация: README.md и каталог docs/
 EOF
 }
 
 FOREGROUND=0
+ROTATE_MODE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -f|--foreground) FOREGROUND=1 ;;
+    --rotate-now)    ROTATE_MODE="now" ;;
+    --rotate-daemon) ROTATE_MODE="daemon" ;;
     -h|--help)       usage; exit 0 ;;
     *) echo "неизвестный аргумент: $1   (справка: ./run.sh --help)" >&2; exit 2 ;;
   esac
@@ -76,8 +94,15 @@ fi
 # <<< install.sh: .env <<<
 
 BIN_DIR="$DIR/bin"
-DATA_DIR="$DIR/data"
-mkdir -p "$BIN_DIR" "$DATA_DIR"
+# Данные (история Prometheus, база Grafana, pid-файлы, сгенерированный конфиг) и
+# логи можно разложить по разным дискам — каталоги задаются в .env:
+#   DATA_DIR=/mnt/disk1/ups-monitoring      тяжёлая часть (история) и pid-файлы
+#   LOG_DIR=/mnt/disk2/ups-monitoring/logs  логи (по умолчанию — как DATA_DIR)
+# Каталоги создаются здесь тихо: если путь недоступен (диск не смонтирован),
+# понятную ошибку выдаёт check_storage_dirs ниже.
+DATA_DIR="${DATA_DIR:-$DIR/data}"
+LOG_DIR="${LOG_DIR:-$DATA_DIR}"
+mkdir -p "$BIN_DIR" "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
 
 # --- версии бинарников (install.sh читает их отсюда) ---
 SNMP_VER="0.26.0"
@@ -93,6 +118,18 @@ GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 RETENTION_TIME="${RETENTION_TIME:-1y}"
 RETENTION_SIZE="${RETENTION_SIZE:-}"
 RESTART_DELAY="${RESTART_DELAY:-5}"     # пауза перед перезапуском упавшего сервиса
+# --- ротация логов по размеру (logrotate не нужен) ---
+# Когда лог дорастает до LOG_MAX_SIZE, файл обрезается на месте: самая старая
+# часть стирается, а хвост (последние LOG_KEEP_PERCENT % от предела) остаётся.
+# Процессы пишут в лог через O_APPEND, поэтому после обрезки они продолжают
+# писать в тот же файл — перезапуск не нужен. LOG_MAX_SIZE=0 выключает ротацию,
+# LOG_KEEP_PERCENT=0 обнуляет файл целиком (хвост не сохраняется).
+# Размер проверяется периодически, поэтому лог может перерасти предел на
+# «скорость записи × пауза» (LOG_CHECK_INTERVAL) — на всякий случай это указано
+# в docs/operations.md.
+LOG_MAX_SIZE="${LOG_MAX_SIZE:-10M}"
+LOG_KEEP_PERCENT="${LOG_KEEP_PERCENT:-10}"
+LOG_CHECK_INTERVAL="${LOG_CHECK_INTERVAL:-10}"   # как часто фоновый ротатор смотрит размеры, сек
 # Таймаут остановки живёт в stop.sh (--timeout, по умолчанию 20 с): run.sh его не
 # передаёт, чтобы связка скриптов работала и со старыми версиями stop.sh.
 
@@ -108,7 +145,208 @@ warn() { printf '! %s\n' "$*" >&2; }
 info() { printf '[i] %s\n' "$*"; }
 step() { printf '[+] %s\n' "$*"; }
 
-# Живой ли процесс и тот ли это процесс (защита от переиспользования PID).
+# =====================================================================
+#  Каталоги и логи
+# =====================================================================
+
+# Понятная ошибка вместо «mkdir: cannot create directory», если путь недоступен.
+ensure_dir() {  # $1 = каталог, $2 = что это
+  local d="$1" what="$2"
+  if ! mkdir -p "$d" 2>/dev/null; then
+    warn "нет доступа к $what: $d"
+    warn "  проверьте права и что диск смонтирован: findmnt -T $d"
+    exit 1
+  fi
+  if [ ! -w "$d" ]; then
+    warn "$what $d недоступен для записи"
+    exit 1
+  fi
+}
+
+# На каком диске (точке монтирования) лежит путь. По /proc/mounts, чтобы не
+# зависеть от util-linux (mountpoint/findmnt есть не везде).
+disk_for() {  # $1 = путь
+  awk -v p="$1" '
+    { mp=$2; gsub(/\\040/, " ", mp)
+      if (mp != "" && index(p, mp) == 1 && length(mp) > length(best)) best = mp }
+    END { print (best == "" ? "/" : best) }' /proc/mounts
+}
+
+# Типичная ошибка: /mnt/disk не смонтирован и данные молча пишутся на системный
+# диск под точку монтирования. Предупреждаем, если вынесенный каталог оказался на /.
+warn_if_root_disk() {  # $1 = путь, $2 = описание
+  case "$1" in
+    "$DIR"*) return 0 ;;                     # внутри каталога установки — норма
+  esac
+  if [ "$(disk_for "$1")" = "/" ]; then
+    warn "$2 $1 на системном диске (/): если он должен лежать на отдельном диске,"
+    warn "  проверьте, что диск смонтирован (findmnt -T $1)"
+  fi
+}
+
+check_storage_dirs() {
+  ensure_dir "$DATA_DIR" "каталог данных"
+  ensure_dir "$LOG_DIR" "каталог логов"
+  warn_if_root_disk "$DATA_DIR" "каталог данных"
+  warn_if_root_disk "$LOG_DIR" "каталог логов"
+}
+
+# Размер в байтах из «10M», «512K», «1G» или просто числа (0 — выключить).
+parse_size() {  # $1 = размер
+  local v="${1:-}" n unit
+  n="${v%[kKmMgG]*}"
+  unit="${v#"$n"}"
+  case "$n" in ''|*[!0-9]*) printf '0'; return 0 ;; esac
+  case "$unit" in
+    '')            printf '%s' "$n" ;;
+    [kK]|[kK][bB]) printf '%s' "$((n * 1024))" ;;
+    [mM]|[mM][bB]) printf '%s' "$((n * 1024 * 1024))" ;;
+    [gG]|[gG][bB]) printf '%s' "$((n * 1024 * 1024 * 1024))" ;;
+    *)             printf '0' ;;
+  esac
+}
+
+init_log_policy() {
+  LOG_MAX_SIZE_BYTES="$(parse_size "$LOG_MAX_SIZE")"
+  case "$LOG_KEEP_PERCENT" in
+    ''|*[!0-9]*) warn "LOG_KEEP_PERCENT='$LOG_KEEP_PERCENT' — не число, беру 10"; LOG_KEEP_PERCENT=10 ;;
+  esac
+  if [ "$LOG_KEEP_PERCENT" -gt 90 ]; then
+    warn "LOG_KEEP_PERCENT=$LOG_KEEP_PERCENT — больше 90% смысла нет, беру 90"
+    LOG_KEEP_PERCENT=90
+  fi
+  case "$LOG_CHECK_INTERVAL" in
+    ''|*[!0-9]*) warn "LOG_CHECK_INTERVAL='$LOG_CHECK_INTERVAL' — не число, беру 10"; LOG_CHECK_INTERVAL=10 ;;
+  esac
+  if [ "$LOG_CHECK_INTERVAL" -lt 5 ]; then
+    warn "LOG_CHECK_INTERVAL=$LOG_CHECK_INTERVAL — минимум 5 секунд, беру 5"
+    LOG_CHECK_INTERVAL=5
+  fi
+  if [ "$LOG_MAX_SIZE" != "0" ] && [ "$LOG_MAX_SIZE_BYTES" = 0 ]; then
+    warn "LOG_MAX_SIZE='$LOG_MAX_SIZE' не разобран (примеры: 10M, 512K, 0) — ротация выключена"
+  fi
+  if [ "$LOG_MAX_SIZE_BYTES" -gt 0 ]; then
+    info "Ротация логов: до $LOG_MAX_SIZE на файл, хвост ${LOG_KEEP_PERCENT}%, проверка каждые ${LOG_CHECK_INTERVAL}s, каталог $LOG_DIR"
+  else
+    info "Ротация логов выключена (LOG_MAX_SIZE=0) — логи в $LOG_DIR растут без ограничения"
+  fi
+}
+
+log_size() {  # $1 = файл -> байты
+  local n
+  n="$(stat -c %s "$1" 2>/dev/null || true)"
+  case "$n" in ''|*[!0-9]*) n="$(wc -c <"$1" 2>/dev/null || echo 0)" ;; esac
+  printf '%s' "${n:-0}"
+}
+
+# Ротация одного лога по размеру: файл обрезается на месте и в нём остаётся
+# хвост (LOG_KEEP_PERCENT % от LOG_MAX_SIZE) — самое старое стирается, свежие
+# записи и контекст сохраняются. Файл именно обнуляется и дописывается, а не
+# переименовывается: процессы держат его открытым с O_APPEND (run.sh открывает
+# логи через >>), поэтому они продолжат писать в тот же файл — перезапуск
+# сервиса не нужен (тот же приём, что у logrotate с copytruncate).
+rotate_log() {  # $1 = файл лога
+  local f="$1" size tail_bytes keep_from tmp tmp2 note="" new_size
+  [ -f "$f" ] || return 0
+  [ "${LOG_MAX_SIZE_BYTES:-0}" -gt 0 ] || return 0
+  size="$(log_size "$f")"
+  [ "$size" -ge "$LOG_MAX_SIZE_BYTES" ] 2>/dev/null || return 0
+
+  tail_bytes=$(( LOG_MAX_SIZE_BYTES * LOG_KEEP_PERCENT / 100 ))
+  # Хвост не меньше файла — резать нечего (например, LOG_KEEP_PERCENT=90 и
+  # файл только-только перешагнул предел).
+  [ "$tail_bytes" -lt "$size" ] || return 0
+
+  tmp="$(mktemp "$LOG_DIR/.rotate.XXXXXX" 2>/dev/null)" || {
+    warn "не удалось создать временный файл в $LOG_DIR — лог ${f##*/} не обрезан"
+    return 1
+  }
+  tmp2="$tmp.new"
+
+  if [ "$tail_bytes" -gt 0 ]; then
+    tail -c "$tail_bytes" "$f" >"$tmp" 2>/dev/null || true
+    # Если хвост начинается в середине строки, первая строка неполная:
+    # в логе от неё всё равно нет смысла, поэтому выбрасываем.
+    keep_from=$((size - tail_bytes))
+    if [ "$keep_from" -gt 0 ] && [ "$(dd if="$f" bs=1 skip=$((keep_from - 1)) count=1 2>/dev/null | od -An -tu1 | tr -d ' \n')" != "10" ]; then
+      if [ -s "$tmp" ] && sed '1d' "$tmp" >"$tmp2" 2>/dev/null; then
+        mv -f "$tmp2" "$tmp"
+        note=" (неполная первая строка отброшена)"
+      fi
+    fi
+  fi
+
+  # Обнуляем лог на месте. Момент между обнулением и дописыванием хвоста
+  # короткий: писатель успеет дописать строку в начало — она просто окажется
+  # не первой. Ничего не теряется: писатели используют O_APPEND.
+  : >"$f" 2>/dev/null || { rm -f "$tmp" "$tmp2"; warn "не удалось обрезать $f"; return 1; }
+  if [ -s "$tmp" ]; then
+    cat "$tmp" >>"$f" 2>/dev/null || warn "хвост лога $f записан не полностью"
+  fi
+  rm -f "$tmp" "$tmp2"
+  new_size="$(log_size "$f")"
+  if [ "$new_size" -lt 1024 ]; then
+    info "лог ${f##*/} обрезан: $((size / 1024))K -> ${new_size} байт${note}"
+  else
+    info "лог ${f##*/} обрезан: $((size / 1024))K -> $((new_size / 1024))K${note}"
+  fi
+  return 0
+}
+
+# Логи сервисов (LOG_DIR/*.log) и внутренние логи Grafana (LOG_DIR/grafana/*.log,
+# если Grafana пишет в файлы, а не только в stdout).
+rotate_logs() {
+  local f
+  for f in "$LOG_DIR"/*.log "$LOG_DIR"/*/*.log; do
+    [ -f "$f" ] || continue
+    rotate_log "$f"
+  done
+}
+
+# --- фоновый ротатор -----------------------------------------------------
+# Ротацию нужно делать, пока стек работает, а не только при запуске: обычный
+# запуск (./run.sh без --foreground) сразу завершается. Поэтому run.sh поднимает
+# отдельный процесс `run.sh --rotate-daemon`, который раз в LOG_CHECK_INTERVAL
+# секунд обрезает разросшиеся логи. Процесс не зависит от systemd и работает
+# при любом способе запуска; его останавливает stop.sh.
+#
+# Свой pid ротатор пишет в LOG_DIR/rotate.pid — рядом с логами, которыми он
+# управляет. Так он находится даже если DATA_DIR перенесли на другой диск:
+# иначе после смены DATA_DIR старый ротатор остался бы жив и новый run.sh поднял
+# бы второй (а pid-файлы сервисов — в DATA_DIR, они относятся к DATA_DIR).
+rotator_pidfile() { printf '%s' "$LOG_DIR/rotate.pid"; }
+
+rotator_alive() {
+  local pidfile pid line
+  pidfile="$(rotator_pidfile)"
+  pid="$(cat "$pidfile" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 1
+  process_alive "$pid" || return 1
+  # Не убить чужой процесс с переиспользованным PID: сверяем командную строку.
+  if [ -r "/proc/$pid/cmdline" ]; then
+    line="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    case "$line" in
+      *rotate-daemon*) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  return 0
+}
+
+start_log_rotator() {
+  local pidfile
+  pidfile="$(rotator_pidfile)"
+  [ "${LOG_MAX_SIZE_BYTES:-0}" -gt 0 ] || return 0
+  if rotator_alive; then
+    info "ротатор логов уже работает (pid $(cat "$pidfile" 2>/dev/null || true))"
+    return 0
+  fi
+  rm -f "$pidfile"
+  nohup "$DIR/run.sh" --rotate-daemon >/dev/null 2>&1 &
+  echo $! >"$pidfile"
+  info "ротатор логов запущен (pid $!): проверка размеров каждые ${LOG_CHECK_INTERVAL}s"
+}
+
 # Живой ли процесс и тот ли это процесс (защита от переиспользования PID).
 # Порядок проверки важен: если сервисы запущены от root, а скрипт запущен
 # обычным пользователем, kill -0 вернёт «нет прав» — хотя процесс работает.
@@ -295,6 +533,42 @@ render_prometheus_config() {
 }
 
 # =====================================================================
+#  Каталоги данных и логов + режимы ротации
+# =====================================================================
+
+# Внутренние режимы ротации работают без запуска стека (и без скачивания
+# бинарников), поэтому выполняются здесь, до всех тяжёлых шагов:
+#   --rotate-now    — один раз обрезать логи и выйти (cron/systemd timer);
+#   --rotate-daemon — фоновый цикл, который поднимает start_log_rotator().
+if [ "$ROTATE_MODE" = "now" ] || [ "$ROTATE_MODE" = "daemon" ]; then
+  check_storage_dirs
+  init_log_policy
+  if [ "$ROTATE_MODE" = "now" ]; then
+    rotate_logs
+    exit 0
+  fi
+  # Ротация выключена — ротатору нечего делать, не оставляем висящий процесс.
+  if [ "$LOG_MAX_SIZE_BYTES" -le 0 ]; then
+    info "LOG_MAX_SIZE=0: ротация выключена, ротатор не нужен"
+    exit 0
+  fi
+  echo $$ >"$(rotator_pidfile)"
+  # shellcheck disable=SC2317
+  on_rotate_signal() {
+    rm -f "$(rotator_pidfile)"
+    exit 0
+  }
+  trap on_rotate_signal TERM INT
+  while :; do
+    rotate_logs
+    sleep "$LOG_CHECK_INTERVAL"
+  done
+fi
+
+check_storage_dirs
+init_log_policy
+
+# =====================================================================
 #  Бинарники
 # =====================================================================
 
@@ -403,6 +677,13 @@ setup_alerts_notifications() {
 export DASHBOARDS_PATH="$DIR/grafana/dashboards"
 export GF_PATHS_DATA="$DATA_DIR/grafana"
 export GF_PATHS_PROVISIONING="$DIR/grafana/provisioning"
+# Свои файловые логи Grafana кладём рядом с остальными логами (на тот же диск),
+# а по умолчанию оставляем режим console: всё, что Grafana пишет, и так попадает
+# в LOG_DIR/grafana.log через перенаправление при запуске — второй файл на том
+# же диске не нужен (переопределяется GF_LOG_MODE=console file в .env).
+export GF_PATHS_LOGS="$LOG_DIR/grafana"
+export GF_LOG_MODE="${GF_LOG_MODE:-console}"
+mkdir -p "$GF_PATHS_LOGS" 2>/dev/null || true
 export GF_SECURITY_ADMIN_USER="${GRAFANA_ADMIN_USER:-admin}"
 export GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-admin}"
 export GF_USERS_ALLOW_SIGN_UP=false
@@ -418,7 +699,7 @@ start_snmp_exporter() {  # $1 = слот: snmp_exporter | snmp_exporter-N
   local port pidfile logfile
   port="$(shard_port "$(shard_index "$slot")")"
   pidfile="$DATA_DIR/$slot.pid"
-  logfile="$DATA_DIR/$slot.log"
+  logfile="$LOG_DIR/$slot.log"
   nohup "$SNMP_DIR/snmp_exporter" \
     --config.file="$DIR/snmp.yml" \
     --config.expand-environment-variables \
@@ -435,12 +716,12 @@ start_prometheus() {
     "--storage.tsdb.retention.time=$RETENTION_TIME"
   )
   [ -n "$RETENTION_SIZE" ] && args+=("--storage.tsdb.retention.size=$RETENTION_SIZE")
-  nohup "$PROM_DIR/prometheus" "${args[@]}" >>"$DATA_DIR/prometheus.log" 2>&1 &
+  nohup "$PROM_DIR/prometheus" "${args[@]}" >>"$LOG_DIR/prometheus.log" 2>&1 &
   echo $! >"$DATA_DIR/prometheus.pid"
 }
 
 start_grafana() {
-  nohup "$GF_DIR/bin/grafana" server --homepath="$GF_DIR" >>"$DATA_DIR/grafana.log" 2>&1 &
+  nohup "$GF_DIR/bin/grafana" server --homepath="$GF_DIR" >>"$LOG_DIR/grafana.log" 2>&1 &
   echo $! >"$DATA_DIR/grafana.pid"
 }
 
@@ -478,7 +759,7 @@ EOF
   wait_http "http://127.0.0.1:${GRAFANA_PORT}/api/health" "Grafana" 60 || fails=$((fails + 1))
   if [ "$fails" -gt 0 ]; then
     warn "часть сервисов не поднялась. Посмотрите логи:"
-    warn "  tail -n 30 $DATA_DIR/*.log"
+    warn "  tail -n 30 $LOG_DIR/*.log"
     warn "  занятые порты: ss -ltnp | grep -E ':($(all_ports | tr '
 ' '|' | sed 's/|$//'))\$'"
     return 1
@@ -506,7 +787,15 @@ print_summary() {
     echo "              уведомления: выключены (по умолчанию), только интерфейс"
   fi
   echo "  История:    хранится $RETENTION_TIME${RETENTION_SIZE:+ (не больше $RETENTION_SIZE)}"
-  echo "  Логи:       $DATA_DIR/*.log"
+  echo "  Логи:       $LOG_DIR/*.log"
+  if [ "$LOG_MAX_SIZE_BYTES" -gt 0 ]; then
+    echo "              ротация: до $LOG_MAX_SIZE на файл, хвост ${LOG_KEEP_PERCENT}% (проверка каждые ${LOG_CHECK_INTERVAL}s)"
+  else
+    echo "              ротация выключена (LOG_MAX_SIZE=0)"
+  fi
+  if [ "$LOG_DIR" != "$DATA_DIR" ]; then
+    echo "  Данные:     $DATA_DIR (история Prometheus, БД Grafana)"
+  fi
   echo "  Остановить: $DIR/stop.sh"
   echo "  Проверить:  $DIR/status.sh"
 }
@@ -543,6 +832,9 @@ fi
 if [ -x "$DIR/stop.sh" ]; then
   "$DIR/stop.sh" --quiet >/dev/null 2>&1 || true
 fi
+
+# Ротатор логов поднимаем после остановки старого стека (stop.sh гасит и его).
+start_log_rotator
 
 if [ "$FOREGROUND" = 1 ]; then
   # Режим супервизора: процессы наши дети, упавшие перезапускаем,
