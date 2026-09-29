@@ -40,6 +40,12 @@ TELEGRAM_CHAT_ID=""
 # читается через ${!key} в ensure_env_keys() — shellcheck этого не видит
 # shellcheck disable=SC2034
 SNMP_SHARDS=""             # число процессов snmp_exporter (пусто = 1)
+# Каталоги на других дисках (пусто = <INSTALL_DIR>/data). Имена совпадают с
+# ключами .env: их читает ${!key} в ensure_env_keys().
+# shellcheck disable=SC2034
+DATA_DIR=""                # история Prometheus, БД Grafana, pid-файлы
+# shellcheck disable=SC2034
+LOG_DIR=""                 # логи сервисов
 ASSUME_YES=0
 SYSTEMD_MODE="auto"        # auto | yes | no
 DO_START=1
@@ -58,6 +64,8 @@ SELF_PIPED=0                # 1, если скрипт пришёл по пай�
 KEEP_TARGETS=0
 KEEP_ENV=0
 GENERATED_PASSWORD=0
+DATA_DIR_EFF=""            # куда реально пойдут данные (заполняет resolve_storage_dirs)
+LOG_DIR_EFF=""             # куда реально пойдут логи
 declare -a ENTRIES=()      # элементы вида "ip|имя|расположение"
 
 # =====================================================================
@@ -146,6 +154,14 @@ UPS Monitoring (native) — установщик v${INSTALLER_VERSION}
                           Без этих значений правила работают, но уведомления
                           не отправляются: видны только в Grafana -> Alerting.
 
+Диски (необязательно, значения хранятся в .env):
+      --data-dir PATH     куда складывать историю Prometheus, базу Grafana и
+                          pid-файлы (по умолчанию <каталог установки>/data)
+      --log-dir PATH      куда складывать логи сервисов (по умолчанию — как
+                          data-dir). Логи обрезаются по размеру: LOG_MAX_SIZE
+                          (10M), хвост LOG_KEEP_PERCENT (10%) — см. .env
+                          Пример: --data-dir /mnt/disk1/ups --log-dir /mnt/disk2/ups-logs
+
 Поведение:
       --systemd           всегда ставить systemd-юнит (автозапуск после ребута)
       --no-systemd        не трогать systemd, запускать через run.sh
@@ -176,6 +192,8 @@ parse_args() {
       -d|--dir)        [ $# -ge 2 ] || die "для $1 нужен путь"; INSTALL_DIR="$2"; shift 2 ;;
       -r|--ref)        [ $# -ge 2 ] || die "для $1 нужна ветка или тег"; REF="$2"; REF_GIVEN=1; shift 2 ;;
       -t|--targets)    [ $# -ge 2 ] || die "для $1 нужен список"; TARGETS_SPEC="$2"; shift 2 ;;
+      --data-dir)      [ $# -ge 2 ] || die "для $1 нужен путь"; DATA_DIR="$2"; shift 2 ;;
+      --log-dir)       [ $# -ge 2 ] || die "для $1 нужен путь"; LOG_DIR="$2"; shift 2 ;;
       -c|--community)  [ $# -ge 2 ] || die "для $1 нужна строка"; COMMUNITY="$2"; shift 2 ;;
       -u|--user)       [ $# -ge 2 ] || die "для $1 нужен логин"; GF_USER="$2"; shift 2 ;;
       -p|--password)   [ $# -ge 2 ] || die "для $1 нужен пароль"; GF_PASSWORD="$2"; shift 2 ;;
@@ -202,6 +220,22 @@ parse_args() {
   case "$INSTALL_DIR" in
     *" "*) die "в пути $INSTALL_DIR есть пробелы — systemd и run.sh не смогут с ним работать. Выберите путь без пробелов." ;;
   esac
+
+  # --data-dir/--log-dir — тоже абсолютные пути без пробелов (попадают в .env и
+  # в systemd-юнит как EnvironmentFile, поэтому пробелы и кавычки недопустимы).
+  local v key val
+  for v in "DATA_DIR:$DATA_DIR" "LOG_DIR:$LOG_DIR"; do
+    key="${v%%:*}"; val="${v#*:}"
+    [ -n "$val" ] || continue
+    case "$val" in
+      /*) : ;;
+      *) die "каталог $key должен быть абсолютным путём: $val" ;;
+    esac
+    [ "$val" != "/" ] || die "$key не может быть /"
+    case "$val" in
+      *" "*) die "в пути $key есть пробелы: $val — выберите путь без пробелов" ;;
+    esac
+  done
 }
 
 # =====================================================================
@@ -592,11 +626,17 @@ install_files() {
   step "Раскладываю файлы в $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR/grafana"
 
-  for f in run.sh stop.sh status.sh prometheus.yml snmp.yml README.md ROADMAP.md CHANGELOG.md; do
+  for f in run.sh stop.sh status.sh prometheus.yml snmp.yml README.md ROADMAP.md CHANGELOG.md .env.example; do
     if [ -f "$STAGE_DIR/$f" ]; then cp -a "$STAGE_DIR/$f" "$INSTALL_DIR/$f"; fi
   done
   if [ -d "$STAGE_DIR/grafana" ]; then
     cp -a "$STAGE_DIR/grafana/." "$INSTALL_DIR/grafana/"
+  fi
+  # Утилиты (tools/targets-from-csv.sh и пример инвентаря) — на них ссылаются
+  # docs/configuration.md и README, читаемые прямо на сервере.
+  if [ -d "$STAGE_DIR/tools" ]; then
+    mkdir -p "$INSTALL_DIR/tools"
+    cp -a "$STAGE_DIR/tools/." "$INSTALL_DIR/tools/"
   fi
   # документация кладётся рядом, чтобы её можно было читать на сервере
   if [ -d "$STAGE_DIR/docs" ]; then
@@ -758,6 +798,13 @@ TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
 # Подробности и расчёт: docs/scaling.md
 SNMP_SHARDS=1
 EOF
+  if [ -n "$DATA_DIR" ] || [ -n "$LOG_DIR" ]; then
+    {
+      printf '\n# --- Каталоги на дисках (--data-dir / --log-dir) ---\n'
+      [ -n "$DATA_DIR" ] && printf 'DATA_DIR=%s\n' "$DATA_DIR"
+      [ -n "$LOG_DIR" ] && printf 'LOG_DIR=%s\n' "$LOG_DIR"
+    } >>"$f"
+  fi
   )
   chmod 600 "$f"
   ok ".env: логин Grafana '$GF_USER'"
@@ -770,7 +817,7 @@ ensure_env_keys() {
   local f="$INSTALL_DIR/.env" key val cur block="" changed=0
   [ -f "$f" ] || return 0
   # ${!key:-} — не падать, если переменная вообще не задана (set -u)
-  for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID SNMP_SHARDS; do
+  for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID SNMP_SHARDS DATA_DIR LOG_DIR; do
     val="${!key:-}"
     if grep -qE "^[[:space:]]*${key}=" "$f"; then
       [ -n "$val" ] || continue                     # не задавали — оставляем как есть
@@ -779,22 +826,34 @@ ensure_env_keys() {
       sed -i "s|^[[:space:]]*${key}=.*|${key}=${val}|" "$f"
       changed=1
     else
-      # дописываем только отсутствующие ключи (иначе получились бы дубли строк,
-      # а последняя пустая строка затирала бы уже настроенное значение)
-      [ "$key" = "SNMP_SHARDS" ] && [ -z "$val" ] && val=1
-      block="${block}${key}=${val}"$'\n'
-      changed=1
+      case "$key" in
+        # Каталоги данных/логов (появились в 1.4.0) не дописываем пустыми:
+        # пустое значение — штатный дефолт run.sh (<каталог установки>/data).
+        DATA_DIR|LOG_DIR)
+          [ -n "$val" ] || continue
+          block="${block}${key}=${val}"$'\n'
+          changed=1 ;;
+        SNMP_SHARDS)
+          [ -n "$val" ] || val=1
+          block="${block}${key}=${val}"$'\n'
+          changed=1 ;;
+        *)
+          # дописываем только отсутствующие ключи (иначе получились бы дубли строк,
+          # а последняя пустая строка затирала бы уже настроенное значение)
+          block="${block}${key}=${val}"$'\n'
+          changed=1 ;;
+      esac
     fi
   done
   [ "$changed" = 1 ] || return 0
   if [ -n "$block" ]; then
     {
-      printf '\n# --- Добавлено install.sh: уведомления об алертах и шардинг опроса ---\n'
+      printf '\n# --- Добавлено install.sh: уведомления, шардинг и каталоги на дисках ---\n'
       printf '%s' "$block"
     } >> "$f"
   fi
   chmod 600 "$f"
-  ok ".env: ключи Telegram и шардинга обновлены"
+  ok ".env: ключи Telegram, шардинга и каталогов обновлены"
 }
 
 # =====================================================================
@@ -1038,17 +1097,62 @@ EOF
   fi
 }
 
-# Логи сервисов пишутся в data/*.log и не должны расти бесконечно.
+# =====================================================================
+#  Каталоги на дисках (--data-dir / --log-dir)
+# =====================================================================
+
+# Точка монтирования, на которой лежит путь. По /proc/mounts — установщик
+# обходится только bash/curl/tar, а findmnt есть не везде.
+mount_of() {  # $1 = путь
+  awk -v p="$1" '
+    { mp=$2; gsub(/\\040/, " ", mp)
+      if (mp != "" && index(p, mp) == 1 && length(mp) > length(best)) best = mp }
+    END { print (best == "" ? "/" : best) }' /proc/mounts
+}
+
+# Куда реально пойдут данные и логи: значение из .env (его задают --data-dir и
+# --log-dir) или <каталог установки>/data по умолчанию.
+resolve_storage_dirs() {
+  DATA_DIR_EFF="$(read_current_env_value DATA_DIR)"
+  [ -n "$DATA_DIR_EFF" ] || DATA_DIR_EFF="$INSTALL_DIR/data"
+  LOG_DIR_EFF="$(read_current_env_value LOG_DIR)"
+  [ -n "$LOG_DIR_EFF" ] || LOG_DIR_EFF="$DATA_DIR_EFF"
+}
+
+# Создаёт каталоги и предупреждает, если вынесенный каталог оказался на
+# системном диске: чаще всего это значит, что диск не смонтирован и данные
+# молча лягут на / (под точку монтирования).
+prepare_storage_dirs() {
+  local d what pair key
+  for pair in "DATA_DIR_EFF:каталог данных" "LOG_DIR_EFF:каталог логов"; do
+    key="${pair%%:*}"; what="${pair#*:}"
+    d="${!key}"
+    if ! mkdir -p "$d" 2>/dev/null; then
+      warn "не удалось создать $what: $d"
+      warn "  проверьте, что диск смонтирован, и права на каталог"
+      continue
+    fi
+    case "$d" in "$INSTALL_DIR"/*) continue ;; esac   # внутри каталога установки — норма
+    if [ "$(mount_of "$d")" = "/" ]; then
+      warn "$what $d оказался на системном диске (/): если он должен лежать на"
+      warn "  отдельном диске — проверьте, смонтирован ли он: findmnt -T $d"
+    fi
+  done
+}
+
+# Логи сервисов пишутся в LOG_DIR/*.log и не должны расти бесконечно.
+# Своя ротация по размеру есть в run.sh (LOG_MAX_SIZE/LOG_KEEP_PERCENT), а это
+# правило раз в неделю дополнительно убирает старое в архив со сжатием.
 # copytruncate нужен потому, что процессы держат файлы открытыми.
 install_logrotate() {
   local cfg="/etc/logrotate.d/${SERVICE_NAME}"
   if [ ! -d /etc/logrotate.d ]; then
-    info "logrotate не установлен — логи в ${INSTALL_DIR}/data/*.log ротируются вручную"
+    info "logrotate не установлен — логи в ${LOG_DIR_EFF}/*.log обрезает сам run.sh (по размеру)"
     return 0
   fi
   step "Настраиваю ротацию логов ($cfg)"
   cat > "$cfg" <<EOF
-${INSTALL_DIR}/data/*.log {
+${LOG_DIR_EFF}/*.log ${LOG_DIR_EFF}/*/*.log {
     weekly
     rotate 8
     compress
@@ -1059,7 +1163,7 @@ ${INSTALL_DIR}/data/*.log {
 }
 EOF
   chmod 644 "$cfg"
-  ok "логи в ${INSTALL_DIR}/data/*.log: неделя x 8, с сжатием"
+  ok "логи в ${LOG_DIR_EFF}: обрезка по размеру (run.sh) + неделя x 8 со сжатием"
 }
 
 start_stack() {
@@ -1075,7 +1179,7 @@ start_stack() {
     if "$INSTALL_DIR/run.sh"; then
       SERVICE_STARTED=1
     else
-      warn "run.sh вернул ошибку, смотрите логи в $INSTALL_DIR/data/*.log"
+      warn "run.sh вернул ошибку, смотрите логи в $LOG_DIR_EFF/*.log"
     fi
   fi
 }
@@ -1123,7 +1227,7 @@ check_alert_rules() {
     fi
   else
     warn "правила алертов не найдены — проверьте grafana/provisioning/alerting/rules.yml"
-    warn "  и лог: $INSTALL_DIR/data/grafana.log"
+    warn "  и лог: $LOG_DIR_EFF/grafana.log"
   fi
 }
 
@@ -1153,7 +1257,7 @@ health_check() {
   fi
 
   if [ "$fails" -gt 0 ]; then
-    warn "часть сервисов не поднялась — логи: $INSTALL_DIR/data/*.log"
+    warn "часть сервисов не поднялась — логи: $LOG_DIR_EFF/*.log"
     if [ "$SYSTEMD" = yes ]; then
       warn "журнал: journalctl -u $SERVICE_NAME -n 50 --no-pager"
     fi
@@ -1218,7 +1322,10 @@ print_summary() {
   else
     printf '  Алерты         в этой версии нет (появились в 1.1.0)\n' >&2
   fi
-  printf '  Логи           %s/data/*.log\n' "$INSTALL_DIR" >&2
+  printf '  Логи           %s/*.log  (обрезка по размеру, хвост %s%%)\n' "$LOG_DIR_EFF" "${LOG_KEEP_PERCENT:-10}" >&2
+  if [ "$LOG_DIR_EFF" != "$DATA_DIR_EFF" ]; then
+    printf '  Данные         %s  (история Prometheus, база Grafana)\n' "$DATA_DIR_EFF" >&2
+  fi
   printf '  Обновить       заново запустить install.sh (настройки сохранятся)\n' >&2
 
   if [ "$SYSTEMD" = yes ]; then
@@ -1348,6 +1455,10 @@ main() {
   write_targets
   write_env
   ensure_env_keys
+  # Куда пойдут данные и логи (DATA_DIR/LOG_DIR из .env, иначе <каталог>/data):
+  # каталоги создаём сразу, чтобы logrotate и systemd нашли их существующими.
+  resolve_storage_dirs
+  prepare_storage_dirs
 
   if [ "$DO_DOWNLOAD" = 1 ]; then
     seed_binaries

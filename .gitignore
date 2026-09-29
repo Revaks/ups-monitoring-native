@@ -1,10 +1,17 @@
 # Бинарники (скачиваются run.sh автоматически)
 bin/
 
-# Данные (TSDB Prometheus, БД Grafana, логи, pid-файлы)
+# Данные (TSDB Prometheus, БД Grafana, логи, pid-файлы).
+# Каталоги можно вынести на другой диск (DATA_DIR/LOG_DIR в .env) — тогда они
+# проекта не касаются; здесь перечислены типовые случаи, если каталог внутри.
 data/
+logs/
 *.log
+*.log.*
 *.pid
+
+# Временные файлы ротации логов (mktemp в LOG_DIR)
+.rotate.*
 
 # Секреты: пароль Grafana, токен Telegram, пароли SNMP v3
 .env
