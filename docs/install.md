@@ -51,7 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 | Бинарники | качает snmp_exporter, Prometheus, Grafana и **проверяет sha256**, раскладывает в `bin/` |
 | Порти | предупреждает, если 3000/9090/9116 заняты |
 | systemd | ставит юнит `ups-monitoring.service` и включает автозапуск |
-| Логи | создаёт правило ротации `/etc/logrotate.d/ups-monitoring` |
+| Каталоги | создаёт `DATA_DIR`/`LOG_DIR` (флаги `--data-dir`/`--log-dir`) и предупреждает, если они оказались на системном диске |
+| Логи | ставит правило ротации `/etc/logrotate.d/ups-monitoring` для реального `LOG_DIR` |
 | Запуск | `systemctl restart ups-monitoring` и ожидание ответа сервисов |
 | Проверка | опрашивает первый ИБП по SNMP и показывает, что получилось |
 
@@ -74,6 +75,8 @@ sudo ./install.sh --help
 | `-p, --password PASS` | пароль Grafana (если не задан — сгенерируется) |
 | `--telegram-token T` | токен бота Telegram для уведомлений |
 | `--telegram-chat ID` | id чата/канала для уведомлений |
+| `--data-dir PATH` | куда писать историю Prometheus, базу Grafana и pid-файлы (по умолчанию `<каталог установки>/data`) |
+| `--log-dir PATH` | куда писать логи сервисов (по умолчанию — как `--data-dir`) |
 | `-y, --yes` | не задавать вопросов, использовать значения по умолчанию |
 | `--systemd` / `--no-systemd` | поставить или не ставить systemd-юнит |
 | `--no-download` | не скачивать бинарники (их скачает `run.sh` при запуске) |
@@ -135,8 +138,12 @@ sudo systemctl stop ups-monitoring
 journalctl -u ups-monitoring -n 50          # сообщения супервизора
 ```
 
-Логи сервисов — не в journal, а в файлы `data/*.log` (их ротирует logrotate
-раз в неделю, хранится 8 архивов).
+Логи сервисов — не в journal, а в файлы `LOG_DIR/*.log` (по умолчанию
+`data/*.log`). Их обрезает сам `run.sh`, когда файл дорастает до `LOG_MAX_SIZE`
+(по умолчанию 10 МБ, хвост 10 % остаётся), а правило logrotate раз в неделю
+убирает старое в архив со сжатием (8 архивов). Каталог задаётся `--log-dir` при
+установке или `LOG_DIR` в `.env` — см.
+[configuration.md](configuration.md#каталоги-на-дисках-и-ротация-логов).
 
 ## Обновление
 
@@ -145,9 +152,10 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
   | sudo bash -s -- --yes
 ```
 
-Что сохраняется: `.env` (логин/пароль Grafana, токен Telegram), `targets.yml`,
-каталог `data/` (история Prometheus и база Grafana). Что обновляется: скрипты,
-конфиги, дашборд, правила алертов, `docs/`.
+Что сохраняется: `.env` (логин/пароль Grafana, токен Telegram, каталоги
+`DATA_DIR`/`LOG_DIR`), `targets.yml`, каталог данных (история Prometheus и база
+Grafana — по умолчанию `data/`, вынесенный `DATA_DIR` установщик не трогает).
+Что обновляется: скрипты, конфиги, дашборд, правила алертов, `docs/`.
 
 Важно: установщик перезаписывает `run.sh` из репозитория. Если вы правили
 `run.sh` на сервере (например, добавляли `--web.listen-address`), перенесите

@@ -19,7 +19,10 @@
   в `targets.yml` — перезапуск не нужен;
 * **рост без переделки**: `SNMP_SHARDS=2` в `.env` — и опрос распределяется
   между несколькими процессами `snmp_exporter` (см.
-  [docs/scaling.md](docs/scaling.md)).
+  [docs/scaling.md](docs/scaling.md));
+* **логи под контролем**: файлы обрезаются по размеру (`LOG_MAX_SIZE`), а данные
+  и логи можно разложить по разным дискам (`DATA_DIR`/`LOG_DIR`) — см.
+  [docs/operations.md](docs/operations.md#данные-и-логи-на-разных-дисках).
 
 ## Быстрый старт
 
@@ -49,8 +52,16 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 /opt/ups-monitoring-native/status.sh      # что запущено, отвечает ли, сколько ИБП
 sudo systemctl restart ups-monitoring     # перезапустить стек
 sudo systemctl stop ups-monitoring        # остановить
-tail -n 50 /opt/ups-monitoring-native/data/*.log    # логи
+tail -n 50 /opt/ups-monitoring-native/data/*.log    # логи (каталог — LOG_DIR в .env)
+./run.sh --rotate-now                     # обрезать логи по размеру прямо сейчас
 ```
+
+Логи не растут бесконечно: `run.sh` поднимает фоновый ротатор и обрезает файл,
+когда он дорастает до `LOG_MAX_SIZE` (по умолчанию 10 МБ) — остаётся хвост
+последних записей, перезапуск сервисов не нужен. Данные и логи можно разнести по
+разным дискам (`DATA_DIR` и `LOG_DIR` в `.env`, флаги установщика
+`--data-dir`/`--log-dir`), см.
+[docs/operations.md](docs/operations.md#ротация-логов-по-размеру).
 
 Если systemd не используется (ручной запуск): `./run.sh`, `./stop.sh`, `./status.sh`.
 
@@ -112,10 +123,10 @@ cat /opt/ups-monitoring-native/.installed-ref      # текущая версия
 | Документ | О чём |
 |---|---|
 | [docs/install.md](docs/install.md) | установка, обновление, удаление, запуск без systemd |
-| [docs/configuration.md](docs/configuration.md) | список ИБП, community и SNMP v3, порты, хранение истории |
+| [docs/configuration.md](docs/configuration.md) | список ИБП, community и SNMP v3, порты, хранение истории, каталоги на дисках и ротация логов |
 | [docs/dashboard.md](docs/dashboard.md) | дашборд: сводка по парку, вкладка на каждый ИБП, метрики и пороги |
 | [docs/alerts.md](docs/alerts.md) | все правила, пороги, уведомления в Telegram, тишина |
-| [docs/operations.md](docs/operations.md) | ежедневная эксплуатация: логи, бэкап, обновление версий |
+| [docs/operations.md](docs/operations.md) | ежедневная эксплуатация: логи и их ротация, диски, бэкап, обновление версий |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | «нет данных», «ИБП недоступен», «порт занят» и другие симптомы |
 | [docs/scaling.md](docs/scaling.md) | сколько выдержит один сервер, шардинг, инвентарь из CSV |
 | [docs/security.md](docs/security.md) | закрыть лишние порты, пароли и секреты |
@@ -150,7 +161,9 @@ ups-monitoring-native/
 ```
 
 `bin/` (бинарники) и `data/` (база Prometheus, Grafana, логи, pid-файлы)
-создаются автоматически и в git не попадают.
+создаются автоматически и в git не попадают. Данные и логи можно вынести на
+другие диски — `DATA_DIR` и `LOG_DIR` в `.env` (или `--data-dir`/`--log-dir`
+установщика); тогда вместо `data/` используются указанные каталоги.
 
 ## Как это работает
 

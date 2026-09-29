@@ -30,6 +30,8 @@
 | 3 | Политика хранения истории: `RETENTION_TIME` (по умолчанию `1y`) и `RETENTION_SIZE` | `.env`, `run.sh`, [docs/operations.md](docs/operations.md) |
 | 4 | `instance` = имя ИБП (`ups_name`), адрес — в отдельной метке `ups_ip` | `prometheus.yml`, аннотации в `rules.yml` |
 | 5 | Ротация логов `data/*.log` (неделя × 8, copytruncate) | `install.sh` → `/etc/logrotate.d/ups-monitoring` |
+| 5.1 | Обрезка логов **по размеру** фоновым ротатором `run.sh` (`LOG_MAX_SIZE`, хвост `LOG_KEEP_PERCENT`, ручной `--rotate-now`) | `run.sh`, `.env`, [docs/operations.md](docs/operations.md#ротация-логов-по-размеру) |
+| 5.2 | Каталоги данных и логов на разных дисках: `DATA_DIR`/`LOG_DIR`, флаги `--data-dir`/`--log-dir`, предупреждение о несмонтированном диске | `.env`, `run.sh`, `stop.sh`, `status.sh`, `install.sh` |
 | 6 | Дашборд: 6 графиков-трендов, timeline «когда работал от батареи», `up` и тревоги в сводной таблице | `grafana/dashboards/ups-overview.json` |
 | 7 | Генератор `targets.yml` из таблицы инвентаря | `tools/targets-from-csv.sh`, `tools/inventory.example.csv` |
 | 8 | Идентификация и тревоги: `upsIdent*`, `upsInputLineBads`, `upsAlarmsPresent` (обходом, чтобы устройства без них не отваливались) + секреты через `--config.expand-environment-variables` | `snmp.yml`, `run.sh` |
@@ -46,6 +48,11 @@
 Шардинг проверен на
 8 эмуляторах ИБП в режимах 1, 2 и 3 шарда (распределение 8/0, 2/6, 3/4/1,
 во всех случаях `up=1` у всех устройств).
+Ротация логов проверена на живом писателе (процесс, пишущий в лог через
+`O_APPEND`): после обрезки он продолжает писать в тот же файл, хвост последних
+строк остаётся, размер под фоновым ротатором держится у предела плюс «скорость
+записи × интервал проверки». Те же проверки выполняются в CI
+(`.github/workflows/ci.yml`, шаг «Ротация логов по размеру»).
 
 ---
 

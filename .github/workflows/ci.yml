@@ -17,13 +17,90 @@ jobs:
 
       - name: Синтаксис bash
         run: |
-          for f in install.sh run.sh stop.sh; do
+          for f in install.sh run.sh stop.sh status.sh tools/*.sh; do
             bash -n "$f"
             echo "bash -n $f: OK"
           done
 
       - name: shellcheck
-        run: shellcheck --severity=warning install.sh run.sh stop.sh
+        run: shellcheck --severity=warning install.sh run.sh stop.sh status.sh tools/*.sh
+
+      - name: Ротация логов по размеру (run.sh --rotate-now)
+        run: |
+          set -euo pipefail
+          LOG_DIR="$RUNNER_TEMP/logs"; DATA_DIR="$RUNNER_TEMP/data"
+          export LOG_DIR DATA_DIR
+          rm -rf "$LOG_DIR" "$DATA_DIR"; mkdir -p "$LOG_DIR" "$DATA_DIR"
+
+          # 1) файл больше предела — обрезается, хвост (последние строки) остаётся
+          seq 1 5000 | sed 's/^/line /' > "$LOG_DIR/prometheus.log"
+          before=$(stat -c %s "$LOG_DIR/prometheus.log")
+          LOG_MAX_SIZE=10K LOG_KEEP_PERCENT=10 ./run.sh --rotate-now
+          after=$(stat -c %s "$LOG_DIR/prometheus.log")
+          echo "prometheus.log: $before -> $after байт"
+          [ "$after" -lt "$before" ] || { echo "::error::лог не обрезан"; exit 1; }
+          [ "$after" -le 4096 ] || { echo "::error::хвост больше ожидаемого"; exit 1; }
+          # без `... | grep -q`: при pipefail grep -q закрывает pipe и tail
+          # получает SIGPIPE — проверка была бы плавающей
+          last="$(tail -1 "$LOG_DIR/prometheus.log")"
+          [ "$last" = "line 5000" ] || { echo "::error::потерян хвост лога (последняя строка: $last)"; exit 1; }
+
+          # 2) маленький файл не трогаем, LOG_MAX_SIZE=0 выключает ротацию
+          echo small > "$LOG_DIR/grafana.log"
+          LOG_MAX_SIZE=0 ./run.sh --rotate-now
+          [ "$(cat "$LOG_DIR/grafana.log")" = small ] \
+            || { echo "::error::тронут маленький лог"; exit 1; }
+
+          # 3) писатель с O_APPEND продолжает писать в тот же файл после обрезки
+          #    (это и позволяет обрезать логи без перезапуска сервисов)
+          ( i=0; while [ "$i" -lt 300 ]; do
+              i=$((i + 1))
+              printf 'writer %04d\n' "$i" >> "$LOG_DIR/snmp_exporter.log"
+              sleep 0.02
+            done ) &
+          writer=$!
+          sleep 0.5
+          LOG_MAX_SIZE=1K ./run.sh --rotate-now
+          size1=$(stat -c %s "$LOG_DIR/snmp_exporter.log")
+          sleep 1
+          size2=$(stat -c %s "$LOG_DIR/snmp_exporter.log")
+          kill "$writer" 2>/dev/null || true
+          wait "$writer" 2>/dev/null || true
+          echo "snmp_exporter.log после обрезки: $size1 -> $size2 байт"
+          [ "$size2" -gt "$size1" ] \
+            || { echo "::error::писатель не продолжил писать после обрезки"; exit 1; }
+          last="$(tail -1 "$LOG_DIR/snmp_exporter.log")"
+          case "$last" in
+            writer\ [0-9]*) : ;;
+            *) echo "::error::файл повреждён обрезкой (последняя строка: $last)"; exit 1 ;;
+          esac
+
+          # 4) фоновый ротатор держит размер под пределом у болтливого сервиса
+          ( i=0; while [ "$i" -lt 600 ]; do
+              i=$((i + 1))
+              printf 'chatty %04d: scrape error\n' "$i" >> "$LOG_DIR/prometheus.log"
+              sleep 0.01
+            done ) &
+          writer2=$!
+          LOG_MAX_SIZE=2K LOG_KEEP_PERCENT=10 LOG_CHECK_INTERVAL=5 \
+            ./run.sh --rotate-daemon >"$RUNNER_TEMP/rotate.log" 2>&1 &
+          daemon=$!
+          sleep 9
+          max_seen=0
+          for _ in $(seq 1 20); do
+            s=$(stat -c %s "$LOG_DIR/prometheus.log")
+            [ "$s" -gt "$max_seen" ] && max_seen=$s
+            sleep 0.1
+          done
+          kill "$daemon" "$writer2" 2>/dev/null || true
+          wait "$daemon" 2>/dev/null || true
+          wait "$writer2" 2>/dev/null || true
+          echo "максимальный размер под ротатором: $max_seen байт (предел 2048)"
+          cat "$RUNNER_TEMP/rotate.log"
+          [ "$max_seen" -le 16384 ] \
+            || { echo "::error::ротатор не сдержал размер лога"; exit 1; }
+          [ -s "$RUNNER_TEMP/rotate.log" ] \
+            || { echo "::error::ротатор ничего не сделал"; exit 1; }
 
       - name: JSON дашборда Grafana
         run: |
