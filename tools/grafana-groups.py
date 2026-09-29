@@ -55,7 +55,9 @@ class Api:
         self.auth = base64.b64encode(f"{user}:{password}".encode()).decode()
         self.dry = dry
 
-    def call(self, method: str, path: str, body=None):
+    def call(self, method: str, path: str, body=None, tolerate: bool = False):
+        """tolerate=True — не падать, если Grafana ещё не слушает порт
+        (нужно в ожидании после перезапуска стека)."""
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.url + path, data=data, method=method)
         req.add_header("Authorization", "Basic " + self.auth)
@@ -69,7 +71,17 @@ class Api:
             raw = exc.read().decode(errors="replace")
             if exc.code == 404:
                 return None
+            if tolerate:
+                return None
             raise SystemExit(f"Grafana API {method} {path} -> HTTP {exc.code}: {raw[:300]}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+            # порт ещё не слушается (Grafana стартует) или сеть недоступна
+            if tolerate:
+                return None
+            raise SystemExit(
+                f"Grafana недоступна по адресу {self.url} ({exc}).\n"
+                f"    Проверьте: systemctl status {os.environ.get('UPS_SERVICE', 'ups-monitoring')} "
+                f"и что адрес указан верно (--url).")
 
 
 def read_env(path: str) -> dict:
@@ -312,13 +324,17 @@ def main() -> None:
                 "OrgId": g["orgId"],
             })
             created.append((login, password, g["org"]))
-            log(f"{login}: создан (id={res.get('id')}) в «{g['org']}» с ролью Viewer")
+            # пароль печатаем сразу: если скрипт упадёт на следующих шагах,
+            # он не потеряется (итоговая сводка идёт в самом конце)
+            log(f"{login}: создан (id={res.get('id')}) в «{g['org']}», роль Viewer, "
+                f"пароль: {password}")
 
     # --- 5. перезапуск стека (если просили) ---
     # Провайдер дашбордов читается Grafana при старте, поэтому новые файлы
     # провижининга подхватятся только после перезапуска. Домашнюю страницу
     # имеет смысл ставить уже после — на несуществующий дашборд Grafana её
     # молча не сохраняет.
+    ready = True
     if args.restart and not args.dry_run:
         step(f"Перезапуск стека ({args.service})")
         try:
@@ -326,27 +342,37 @@ def main() -> None:
             log("systemctl restart выполнен")
         except (subprocess.CalledProcessError, FileNotFoundError) as exc:
             log(f"не удалось перезапустить через systemctl ({exc}); перезапустите вручную")
-        for _ in range(60):
-            if api.call("GET", "/api/health"):
+        # Grafana поднимается не мгновенно: ждём, пока порт начнёт отвечать.
+        # tolerate=True — «порт ещё закрыт» это нормальная ситуация, а не ошибка.
+        ready, deadline = False, time.time() + 180
+        while time.time() < deadline:
+            if api.call("GET", "/api/health", tolerate=True):
+                ready = True
                 break
             time.sleep(2)
-        log("Grafana снова отвечает")
+        log("Grafana снова отвечает" if ready
+            else f"Grafana не ответила за 180 с — проверьте: systemctl status {args.service}")
 
     # --- 6. домашний дашборд организации (лендинг группы) ---
     step("Домашняя страница организаций")
-    for g in cfg["groups"]:
-        uid = f"ups-{g['slug']}"
-        if args.dry_run:
-            log(f"{g['org']}: БУДЕТ home = {uid}")
-            continue
-        api.call("POST", f"/api/user/using/{g['orgId']}")          # переключить контекст
-        if not api.call("GET", f"/api/dashboards/uid/{uid}"):
-            log(f"{g['org']}: дашборд {uid} ещё не провижинился — "
-                f"перезапустите стек и запустите скрипт снова (или используйте --restart)")
-            continue
-        api.call("PUT", "/api/org/preferences", {"homeDashboardUID": uid})
-        log(f"{g['org']}: home = {uid}")
-    api.call("POST", "/api/user/using/1")                          # вернуться в Main Org
+    if not ready:
+        log("Grafana недоступна — домашние страницы не выставляю")
+        log("  когда стек поднимется, запустите скрипт ещё раз (без --restart):")
+        log(f"    sudo python3 {os.path.basename(__file__)} --config {args.config}")
+    else:
+        for g in cfg["groups"]:
+            uid = f"ups-{g['slug']}"
+            if args.dry_run:
+                log(f"{g['org']}: БУДЕТ home = {uid}")
+                continue
+            api.call("POST", f"/api/user/using/{g['orgId']}")      # переключить контекст
+            if not api.call("GET", f"/api/dashboards/uid/{uid}", tolerate=True):
+                log(f"{g['org']}: дашборд {uid} ещё не провижинился — "
+                    f"перезапустите стек и запустите скрипт снова")
+                continue
+            api.call("PUT", "/api/org/preferences", {"homeDashboardUID": uid})
+            log(f"{g['org']}: home = {uid}")
+        api.call("POST", "/api/user/using/1")                      # вернуться в Main Org
 
     # --- итог ---
     print()
