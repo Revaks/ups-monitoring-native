@@ -25,6 +25,11 @@ jobs:
       - name: shellcheck
         run: shellcheck --severity=warning install.sh run.sh stop.sh status.sh tools/*.sh
 
+      - name: Синтаксис Python и JSON (tools/grafana-groups)
+        run: |
+          python3 -m py_compile tools/grafana-groups.py
+          python3 -c "import json; c=json.load(open('tools/grafana-groups.example.json', encoding='utf-8')); assert c['groups']; [g[k] for g in c['groups'] for k in ('org','slug','title','location_filter','users')]; print('grafana-groups.example.json OK, групп:', len(c['groups']))"
+
       - name: Ротация логов по размеру (run.sh --rotate-now)
         run: |
           set -euo pipefail

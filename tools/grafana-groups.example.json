@@ -1,0 +1,50 @@
+{
+  "_комментарий": [
+    "Пример настроек для tools/grafana-groups.py (см. docs/access.md).",
+    "Скопируйте в /root/groups.json (права 600) и поправьте под себя:",
+    "  location_filter — какие ИБП видит группа;",
+    "  users           — кого завести (пароли скрипт сгенерирует сам и напечатает один раз).",
+    "",
+    "location_filter — регулярное выражение Prometheus. В PromQL оно анкорится целиком,",
+    "поэтому для 'всех узлов КПП' нужно 'КПП.*', а не 'КПП'; для нескольких узлов — 'ЦОД-1|ЦОД-2'.",
+    "null — группа видит весь парк. Скрипт сам проверит фильтр по Prometheus и напишет,",
+    "сколько ИБП под него попало (0 — почти наверняка ошибка в выражении).",
+    "",
+    "У каждого ИБП в targets.yml должна быть метка location, иначе он не попадёт ни в одну",
+    "из групп: группы фильтруют именно по ней."
+  ],
+
+  "grafana_url": "http://localhost:3000",
+  "datasource_url": null,
+  "base_dashboard": "grafana/dashboards/ups-overview.json",
+
+  "groups": [
+    {
+      "org": "Инженеры",
+      "slug": "engineers",
+      "title": "ИБП — инженерный обзор (весь парк)",
+      "location_filter": null,
+      "users": [
+        {"login": "ivan.engineer", "name": "Иван Инженеров", "email": "ivan.engineer@example.local"}
+      ]
+    },
+    {
+      "org": "Операторы",
+      "slug": "operators",
+      "title": "ИБП — страница смены",
+      "location_filter": "Коммутационный узел.*",
+      "users": [
+        {"login": "petr.operator", "name": "Пётр Операторов", "email": "petr.operator@example.local"}
+      ]
+    },
+    {
+      "org": "Слаботочные системы",
+      "slug": "lowvoltage",
+      "title": "ИБП — слаботочные системы",
+      "location_filter": "Слаботочн.*",
+      "users": [
+        {"login": "slava.lowvoltage", "name": "Слава Слаботочник", "email": "slava.lowvoltage@example.local"}
+      ]
+    }
+  ]
+}

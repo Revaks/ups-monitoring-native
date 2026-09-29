@@ -13,6 +13,36 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 Список версий: [Releases](https://github.com/Revaks/ups-monitoring-native/releases)
 и `git tag -l`. Что именно поменялось — ниже.
 
+## [1.5.0] — 2026-09-29
+
+### Добавлено
+
+* **Своя страница мониторинга для каждой группы подразделений — только чтение**
+  (`tools/grafana-groups.py`, настройка — `tools/grafana-groups.example.json`,
+  описание — [docs/access.md](docs/access.md); нужен `python3`). Скрипт создаёт в
+  Grafana организации («Инженеры», «Операторы», «Слаботочные системы» и т. п.),
+  в каждой — свою папку с дашбордом, свой Prometheus-датасорс, локальные аккаунты
+  с ролью `Viewer` и домашний дашборд организации, поэтому после входа сразу
+  открывается страница группы. Дашборд группы — копия штатного «ИБП — обзор»,
+  в которую во **все** выражения (включая счётчики сводки, таблицу парка и
+  timeline'ы) подставлен фильтр по метке `location` из `targets.yml`: группа
+  видит только свои ИБП и не видит чужих дашбордов вообще. Скрипт идемпотентен,
+  фильтр проверяет по живому Prometheus и предупреждает, если под него не попал
+  ни один ИБП. Файлы провижининга складываются отдельными именами (`groups.yml`),
+  поэтому обновление стека их не затирает.
+
+### Изменено
+
+* Документация: новый [docs/access.md](docs/access.md) — как устроены организации,
+  роли и права, справочник по API Grafana (создание пользователей, роли, права на
+  папки), ограничения; ссылки из README (список документации и «Что вы получите»).
+* CI: проверка синтаксиса `tools/grafana-groups.py` и разбор примера настроек.
+
+### Исправлено
+
+* CHANGELOG: восстановлены отсутствовавшие ссылки на `[1.4.0]` и `[1.3.0]` —
+  заголовки этих версий не превращались в ссылки.
+
 ## [1.4.0] — 2026-09-29
 
 ### Добавлено
@@ -253,6 +283,9 @@ Prometheus + Grafana обычными процессами.
 * `install.sh`: установка на сервер одной командой, проверка sha256, автозапуск
   через systemd, интерактивная настройка и флаги.
 
+[1.5.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.5.0
+[1.4.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.4.0
+[1.3.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.3.0
 [1.2.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.2.0
 [1.1.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.1.1

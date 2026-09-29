@@ -24,3 +24,7 @@ logs/
 # Создаются только когда включены уведомления, т.е. заданы TELEGRAM_*.
 grafana/provisioning/alerting/contact-points.yml
 grafana/provisioning/alerting/policies.yml
+
+# Кэш python (tools/grafana-groups.py) и личные настройки групп
+__pycache__/
+*.pyc

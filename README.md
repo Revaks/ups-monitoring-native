@@ -22,7 +22,10 @@
   [docs/scaling.md](docs/scaling.md));
 * **логи под контролем**: файлы обрезаются по размеру (`LOG_MAX_SIZE`), а данные
   и логи можно разложить по разным дискам (`DATA_DIR`/`LOG_DIR`) — см.
-  [docs/operations.md](docs/operations.md#данные-и-логи-на-разных-дисках).
+  [docs/operations.md](docs/operations.md#данные-и-логи-на-разных-дисках);
+* **доступ по группам**: инженерам, операторам смены и другим подразделениям —
+  своя страница «только чтение» со своими ИБП (`tools/grafana-groups.py`,
+  см. [docs/access.md](docs/access.md); нужен `python3`).
 
 ## Быстрый старт
 
@@ -130,6 +133,7 @@ cat /opt/ups-monitoring-native/.installed-ref      # текущая версия
 | [docs/troubleshooting.md](docs/troubleshooting.md) | «нет данных», «ИБП недоступен», «порт занят» и другие симптомы |
 | [docs/scaling.md](docs/scaling.md) | сколько выдержит один сервер, шардинг, инвентарь из CSV |
 | [docs/security.md](docs/security.md) | закрыть лишние порты, пароли и секреты |
+| [docs/access.md](docs/access.md) | страницы «только чтение» для групп: организации, роли, свои ИБП |
 | [CHANGELOG.md](CHANGELOG.md) | что менялось от версии к версии |
 | [ROADMAP.md](ROADMAP.md) | что уже сделано и что в планах |
 
@@ -151,7 +155,9 @@ ups-monitoring-native/
 ├── docs/             # документация
 ├── tools/
 │   ├── targets-from-csv.sh      # собрать targets.yml из таблицы инвентаря
-│   └── inventory.example.csv    # пример такой таблицы
+│   ├── inventory.example.csv    # пример такой таблицы
+│   ├── grafana-groups.py        # страницы «только чтение» для групп (docs/access.md)
+│   └── grafana-groups.example.json   # пример настроек групп
 └── grafana/
     ├── provisioning/
     │   ├── datasources/   # источник данных Prometheus
