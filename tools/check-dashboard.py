@@ -13,9 +13,12 @@
   4. внутренние ссылки `/d/<uid>/…` указывают на существующий дашборд.
 
 Дополнительно, если рядом лежит `grafana-groups.py`, для каждого дашборда
-собирается копия группы (`make_group_dashboard`) и проверяется отдельно: копия
-живёт в своей организации, поэтому **все** ссылки в ней должны вести на неё
-саму, а не на базовый дашборд из Main Org.
+собираются копии группы (`make_group_dashboard`) в двух вариантах доступа —
+ручной regex по `location` и список площадок (`site`) — и проверяются отдельно:
+копия живёт в своей организации, поэтому **все** ссылки в ней должны вести на
+неё саму, а не на базовый дашборд из Main Org, а фильтр доступа обязан попасть
+в каждое выражение с `job="snmp"` (пропущенное выражение = панель, показывающая
+чужую территорию).
 
 Запуск: `python3 tools/check-dashboard.py` (из любого каталога — путь к репозиторию
 берётся от расположения скрипта). Ненулевой код возврата — есть проблемы.
@@ -146,42 +149,72 @@ def load_groups_module():
     return module
 
 
+# Варианты доступа группы: ручной regex по location (как было) и список
+# площадок (site). Второй проверяет, что фильтр доезжает до ВСЕХ выражений —
+# именно на нём держится разграничение прав между подразделениями.
+GROUP_VARIANTS = (
+    ("regex", "selfcheck-loc", ".*", None),
+    # Название площадки со спецсимволами RE2: проверяем, что экранирование
+    # даёт валидный PromQL, а не только простые названия.
+    ("sites", "selfcheck-site", None, ["Площадка №1", "ЦОД-1 (основной)"]),
+)
+
+
+def check_one_copy(module, name: str, dash: dict, slug: str, regex, sites,
+                   errors: list) -> tuple:
+    """Собирает одну копию группы и проверяет её как отдельный дашборд."""
+    result = module.make_group_dashboard(
+        dash, slug, f"{dash.get('title')} ({slug})", regex, sites=sites)
+    # Старые версии скрипта возвращали (дашборд, число замен) без ссылок.
+    copy, replaced = result[0], result[1]
+    links = result[2] if len(result) > 2 else None
+    copy_name = f"{name} (копия ups-{slug})"
+
+    if copy.get("uid") != f"ups-{slug}":
+        errors.append(f"{copy_name}: uid копии {copy.get('uid')!r} вместо ups-{slug}")
+
+    base_uid = dash.get("uid")
+    if base_uid:
+        left = sum(text.count(f"/d/{base_uid}") for text in iter_strings(copy))
+        if left:
+            errors.append(
+                f"{copy_name}: осталась ссылка на базовый дашборд /d/{base_uid}/ — "
+                f"в организации группы существует только сама копия"
+            )
+
+    expected = count_marker(dash, 'job="snmp"')
+    if expected and not replaced:
+        errors.append(
+            f"{copy_name}: фильтр доступа не подставился ни в одно из "
+            f"{expected} выражений с job=\"snmp\""
+        )
+
+    # Фильтр по площадкам обязан попасть в каждое выражение: пропущенное
+    # выражение = панель, которая покажет чужую территорию.
+    if sites:
+        matcher = module.sites_matcher(sites)
+        got = count_marker(copy, f'site=~"{matcher}"')
+        if got < expected:
+            errors.append(
+                f"{copy_name}: фильтр площадок попал только в {got} из {expected} "
+                f"выражений — часть панелей покажет чужие территории"
+            )
+
+    check_container(copy_name, copy.get("panels") or [], errors)
+    check_links(copy_name, copy, {copy.get("uid")}, errors)
+    return copy_name, links
+
+
 def check_group_copies(module, dashes: dict, errors: list) -> int:
     """Собирает копии для фиктивной группы и проверяет их как отдельные дашборды."""
     checked = 0
     for name, dash in dashes.items():
-        slug = "selfcheck"
-        result = module.make_group_dashboard(
-            dash, slug, f"{dash.get('title')} (selfcheck)", ".*")
-        # Старые версии скрипта возвращали (дашборд, число замен) без ссылок.
-        copy, replaced = result[0], result[1]
-        links = result[2] if len(result) > 2 else None
-        copy_name = f"{name} (копия группы ups-{slug})"
-        checked += 1
-
-        if copy.get("uid") != f"ups-{slug}":
-            errors.append(f"{copy_name}: uid копии {copy.get('uid')!r} вместо ups-{slug}")
-
-        base_uid = dash.get("uid")
-        if base_uid:
-            left = sum(text.count(f"/d/{base_uid}") for text in iter_strings(copy))
-            if left:
-                errors.append(
-                    f"{copy_name}: осталась ссылка на базовый дашборд /d/{base_uid}/ — "
-                    f"в организации группы существует только сама копия"
-                )
-            elif left == 0 and links is not None:
-                print(f"  {copy_name}: ссылок переадресовано на свою копию — {links}")
-
-        expected = count_marker(dash, 'job="snmp"')
-        if expected and not replaced:
-            errors.append(
-                f"{copy_name}: фильтр location не подставился ни в одно из "
-                f"{expected} выражений с job=\"snmp\""
-            )
-
-        check_container(copy_name, copy.get("panels") or [], errors)
-        check_links(copy_name, copy, {copy.get("uid")}, errors)
+        for label, slug, regex, sites in GROUP_VARIANTS:
+            copy_name, links = check_one_copy(
+                module, name, dash, slug, regex, sites, errors)
+            checked += 1
+            if links is not None:
+                print(f"  {copy_name} [{label}]: ссылок переадресовано на свою копию — {links}")
     return checked
 
 
@@ -240,8 +273,9 @@ def main() -> int:
     print(f"Дашборды OK: файлов {len(dashes)}, панелей {panels_total}, "
           f"внутренних ссылок {links_total}")
     if groups_checked:
-        print(f"Копии групп OK: собрано и проверено {groups_checked}, "
-              f"ссылки ведут на сами копии, фильтр location подставляется")
+        print(f"Копии групп OK: собрано и проверено {groups_checked} "
+              f"(варианты regex по location и список площадок), "
+              f"ссылки ведут на сами копии, фильтр доступа подставляется во все выражения")
     return 0
 
 

@@ -736,9 +736,13 @@ write_targets() {
     printf '#   - targets:\n'
     printf '#       - <IP-адрес ИБП>\n'
     printf '#     labels:\n'
+    printf '#       site: <территория/площадка>\n'
     printf '#       ups_name: <имя на дашборде>\n'
     printf '#       location: <расположение>\n'
     printf '#\n'
+    printf '# site — по нему группы подразделений видят только свои ИБП\n'
+    printf '# (список площадок задаётся в groups.json, см. docs/access.md).\n'
+    printf '# Пишите название одинаково у всех ИБП одной территории.\n'
     printf '# Дополнительно (необязательно): snmp_auth — имя блока auths из snmp.yml\n'
     printf '# для устройств с другим community или SNMP v3; snmp_module — имя модуля.\n'
     printf '#\n'
@@ -751,6 +755,7 @@ write_targets() {
       printf -- '- targets:\n'
       printf '    - 192.168.1.10\n'
       printf '  labels:\n'
+      printf "    site: 'Площадка №1'\n"
       printf "    ups_name: 'UPS-01'\n"
       printf "    location: 'Коммутационный узел №1'\n"
       return 0

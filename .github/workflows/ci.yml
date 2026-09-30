@@ -28,7 +28,17 @@ jobs:
       - name: Синтаксис Python и JSON (tools/)
         run: |
           python3 -m py_compile tools/*.py
-          python3 -c "import json; c=json.load(open('tools/grafana-groups.example.json', encoding='utf-8')); assert c['groups']; [g[k] for g in c['groups'] for k in ('org','slug','title','location_filter','users')]; print('grafana-groups.example.json OK, групп:', len(c['groups']))"
+          # Пример настроек групп проверяем тем же валидатором, что и рабочий
+          # конфиг: так в CI ловится опечатка в ключе (например `site` вместо
+          # `sites`) и дубль slug, а не только синтаксис JSON.
+          python3 -c "
+          import importlib.util, json
+          spec = importlib.util.spec_from_file_location('grafana_groups', 'tools/grafana-groups.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.validate_config(json.load(open('tools/grafana-groups.example.json', encoding='utf-8')))
+          print('grafana-groups.example.json OK')
+          "
 
       - name: Ротация логов по размеру (run.sh --rotate-now)
         run: |
@@ -146,25 +156,48 @@ jobs:
         run: |
           PROM_VER="$(sed -n 's/^PROM_VER="\([^"]*\)".*/\1/p' run.sh | head -n 1)"
           python3 - <<'PY'
-          import json, pathlib, re
+          import importlib.util, json, pathlib, re
           exprs = []
-          for path in sorted(pathlib.Path('grafana/dashboards').glob('*.json')):
-              def walk(items):
-                  for panel in items:
-                      for target in panel.get('targets', []):
-                          if target.get('expr'):
-                              exprs.append(target['expr'])
-                      walk(panel.get('panels', []))
+
+          def walk(items):
+              for panel in items:
+                  for target in panel.get('targets', []):
+                      if target.get('expr'):
+                          exprs.append(target['expr'])
+                  walk(panel.get('panels', []))
+
+          dashboards = sorted(pathlib.Path('grafana/dashboards').glob('*.json'))
+          for path in dashboards:
               walk(json.loads(path.read_text(encoding='utf-8'))['panels'])
+
+          # Отдельно проверяем выражения копии группы: в них фильтр доступа
+          # подставлен жёстко, рядом с ссылкой на переменную — это два матчера
+          # по одной метке. Невалидное выражение здесь означало бы, что группа
+          # видит не то, что должна.
+          spec = importlib.util.spec_from_file_location(
+              'grafana_groups', 'tools/grafana-groups.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          for path in dashboards:
+              base = json.loads(path.read_text(encoding='utf-8'))
+              for slug, regex, sites in (('ci-loc', 'Узел.*', None),
+                                         # название со спецсимволами RE2 — проверяем
+                                         # экранирование, а не только простой случай
+                                         ('ci-site', None, ['Площадка №1', 'ЦОД-1 (основной)'])):
+                  copy, _, _ = module.make_group_dashboard(
+                      base, slug, 'CI', regex, sites=sites)
+                  walk(copy['panels'])
+
           # переменные Grafana -> значения, чтобы выражение стало валидным PromQL
           uniq = sorted({re.sub(r'\s+', ' ', e).replace('$ups', 'UPS-01')
+                         .replace('$site', 'Площадка №1')
                          .replace('$instance', '192.168.1.10') for e in exprs})
           lines = ['groups:', '  - name: dashboard', '    rules:']
           for i, expr in enumerate(uniq):
               lines += [f'      - record: check_{i:03d}', f"        expr: '{expr}'"]
           pathlib.Path('/tmp/dashboard-rules.yml').write_text('\n'.join(lines) + '\n',
                                                               encoding='utf-8')
-          print(f'выражений в дашбордах: {len(uniq)}')
+          print(f'выражений в дашбордах и копиях групп: {len(uniq)}')
           PY
           /tmp/prometheus-"$PROM_VER".linux-amd64/promtool check rules /tmp/dashboard-rules.yml
 

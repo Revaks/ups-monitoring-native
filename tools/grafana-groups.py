@@ -8,8 +8,8 @@
 #    2. раскладывает файлы провижининга: свой Prometheus-датасорс в каждой
 #       организации и свой провайдер дашбордов (папка = страница группы);
 #    3. генерирует дашборд группы из штатного ups-overview.json, подставляя
-#       в запросы фильтр по метке location (у операторов/слаботочников —
-#       только их ИБП);
+#       в запросы фильтр доступа: список площадок (метка site) и/или ручной
+#       regex по метке location — у электриков видны только ИБП их территорий;
 #    4. создаёт локальные аккаунты с ролью Viewer в нужной организации;
 #    5. ставит домашний дашборд организации (лендинг после входа).
 #
@@ -106,24 +106,137 @@ def gen_password(n: int = 16) -> str:
 
 
 # --------------------------------------------------------------- dashboards
-def inject_location_filter(obj, regex: str, path: str = "$") -> int:
-    """Подставляет location=~"regex" во все matcher'ы {job="snmp"}.
+# Символы, значимые для регулярных выражений RE2 (PromQL): их экранируем в
+# значениях меток, иначе «Площадка №1 (основная)» превратится в группу в regex.
+REGEX_SPECIAL = set(r"\.+*?()|[]{}^$")
 
-    Работает рекурсивно по всему JSON дашборда: выражения панелей,
-    запросы переменных. Возвращает число заменённых строк.
+
+def escape_regex(value: str) -> str:
+    """Экранирует значение метки для подстановки в regex PromQL.
+
+    Каждый спецсимвол получает ДВА обратных слэша. Выражение попадает в
+    строковый литерал PromQL, который сам разбирает escape-последовательности:
+    одиночный `\\(` он отвергает с ошибкой «unknown escape sequence», и уже
+    после разбора строки до RE2 доходит один слэш — то есть «литеральная
+    скобка». Проверено `promtool check rules`: «Площадка №1 (основная)» без
+    удвоения ломала разбор всего выражения.
+    """
+    return "".join("\\\\" + ch if ch in REGEX_SPECIAL else ch for ch in value)
+
+
+def sites_matcher(sites) -> str:
+    """Regex «ровно одна из площадок списка».
+
+    `=~` в PromQL анкорится целиком, но скобки оставляем явно: так выражение
+    читается однозначно, когда площадок несколько.
+    """
+    return "^(?:%s)$" % "|".join(escape_regex(s) for s in sites)
+
+
+def group_filters(g: dict) -> list:
+    """Фильтры группы: список площадок и/или ручной regex по location.
+
+    Возвращает список пар (метка, regex). Оба ключа можно указывать вместе —
+    тогда условия складываются по И (площадка и расположение одновременно).
+    """
+    filters = []
+    if g.get("sites"):
+        filters.append(("site", sites_matcher(g["sites"])))
+    if g.get("location_filter"):
+        filters.append(("location", g["location_filter"]))
+    return filters
+
+
+def describe_filters(filters) -> str:
+    """Человекочитаемое описание фильтров для лога."""
+    if not filters:
+        return "без фильтра (весь парк)"
+    return " и ".join(f"{label}=~{regex!r}" for label, regex in filters)
+
+
+def validate_config(cfg: dict) -> None:
+    """Проверяет groups.json до обращения к Grafana.
+
+    Ловит опечатки в названиях ключей и площадок: без этого группа молча
+    получала бы доступ ко всему парку (пустой фильтр = фильтра нет).
+    """
+    groups = cfg.get("groups")
+    if not isinstance(groups, list) or not groups:
+        die("в groups.json нет непустого списка groups")
+
+    seen = {}
+    for i, g in enumerate(groups):
+        where = f"groups[{i}]"
+        if not isinstance(g, dict):
+            die(f"{where}: ожидается объект")
+        for key in ("org", "slug", "title"):
+            if not isinstance(g.get(key), str) or not g[key].strip():
+                die(f"{where}: не задано обязательное поле {key!r}")
+        where = f"{where} ({g['slug']})"
+
+        if g["slug"] in seen:
+            die(f"{where}: slug повторяется (уже есть у «{seen[g['slug']]}») — "
+                f"uid дашбордов совпадут")
+        seen[g["slug"]] = g["org"]
+
+        sites = g.get("sites")
+        if sites is not None:
+            if not isinstance(sites, list) or not sites:
+                die(f"{where}: sites должен быть непустым списком названий площадок")
+            for s in sites:
+                if not isinstance(s, str) or not s.strip():
+                    die(f"{where}: в sites пустое или нестроковое название площадки")
+            # Площадка со звёздочкой — почти всегда попытка написать regex там,
+            # где ожидается точное название: получится «ровно эта строка».
+            for s in sites:
+                if "*" in s or "|" in s:
+                    die(f"{where}: название площадки {s!r} выглядит как regex — "
+                        f"перечислите площадки точно, как в метке site в targets.yml")
+
+        loc = g.get("location_filter")
+        if loc is not None and (not isinstance(loc, str) or not loc.strip()):
+            die(f"{where}: location_filter должен быть непустой строкой или null "
+                f"(null или пропуск = без ограничения по location)")
+
+        users = g.get("users") or []
+        if not isinstance(users, list):
+            die(f"{where}: users должен быть списком")
+        for u in users:
+            if not isinstance(u, dict) or not u.get("login"):
+                die(f"{where}: у каждого пользователя нужен login")
+
+        if not group_filters(g):
+            log(f"    {g['org']}: фильтр не задан — группа увидит ВЕСЬ парк")
+
+
+def inject_label_filter(obj, label: str, regex: str, path: str = "$") -> int:
+    """Подставляет <label>=~"regex" во все matcher'ы {job="snmp"}.
+
+    Работает рекурсивно по всему JSON дашборда: выражения панелей, запросы
+    переменных. Возвращает число заменённых строк.
+
+    Проверяем именно свой матчер, а не подстроку `<label>=~`: в дашборде уже
+    есть `site=~"$site"` (переменная-фильтр), и по подстроке фильтр группы
+    не подставился бы вовсе.
     """
     changed = 0
+    matcher = f'{label}=~"{regex}"'
     if isinstance(obj, dict):
         for key, val in obj.items():
-            if isinstance(val, str) and 'job="snmp"' in val and "location=~" not in val:
-                obj[key] = val.replace('job="snmp"', f'job="snmp", location=~"{regex}"')
+            if isinstance(val, str) and 'job="snmp"' in val and matcher not in val:
+                obj[key] = val.replace('job="snmp"', f'job="snmp", {matcher}')
                 changed += 1
             else:
-                changed += inject_location_filter(val, regex, f"{path}.{key}")
+                changed += inject_label_filter(val, label, regex, f"{path}.{key}")
     elif isinstance(obj, list):
         for i, val in enumerate(obj):
-            changed += inject_location_filter(val, regex, f"{path}[{i}]")
+            changed += inject_label_filter(val, label, regex, f"{path}[{i}]")
     return changed
+
+
+def inject_location_filter(obj, regex: str, path: str = "$") -> int:
+    """Совместимость: фильтр по location (до появления площадок)."""
+    return inject_label_filter(obj, "location", regex, path)
 
 
 def retarget_links(obj, old_uid: str, new_uid: str) -> int:
@@ -151,7 +264,8 @@ def retarget_links(obj, old_uid: str, new_uid: str) -> int:
     return changed
 
 
-def make_group_dashboard(base: dict, slug: str, title: str, regex) -> tuple:
+def make_group_dashboard(base: dict, slug: str, title: str, regex=None,
+                         *, sites=None) -> tuple:
     dash = json.loads(json.dumps(base))  # глубокая копия
     base_uid = dash.get("uid")
     dash["uid"] = f"ups-{slug}"
@@ -163,9 +277,12 @@ def make_group_dashboard(base: dict, slug: str, title: str, regex) -> tuple:
     # Ссылки на базовый дашборд -> на саму копию (в организации группы
     # существует только она).
     links = retarget_links(dash, base_uid, dash["uid"]) if base_uid else 0
+    # Доступ группы: список площадок и/или ручной regex по location.
+    filters = group_filters({"sites": sites, "location_filter": regex})
     n = 0
-    if regex:
-        n = inject_location_filter(dash, regex)
+    if filters:
+        for label, rx in filters:
+            n += inject_label_filter(dash, label, rx)
         dash["tags"] = sorted(set(dash.get("tags", []) + ["group", slug]))
     return dash, n, links
 
@@ -234,6 +351,8 @@ def main() -> None:
     with open(args.config, encoding="utf-8") as fh:
         cfg = json.load(fh)
 
+    validate_config(cfg)
+
     install_dir = args.dir.rstrip("/")
     env = read_env(os.path.join(install_dir, ".env"))
 
@@ -280,9 +399,10 @@ def main() -> None:
         g["orgId"] = res["orgId"]
         log(f"{name}: создана (orgId={g['orgId']})")
 
-    def filter_matches(regex: str):
-        """Сколько ИБП попадает под фильтр location. None — Prometheus недоступен."""
-        query = f'count(up{{job="snmp", location=~"{regex}"}}) or vector(0)'
+    def filter_matches(filters) -> "int | None":
+        """Сколько ИБП попадает под фильтры группы. None — Prometheus недоступен."""
+        sel = "".join(f', {label}=~"{rx}"' for label, rx in filters)
+        query = f'count(up{{job="snmp"{sel}}}) or vector(0)'
         url = ds_url.rstrip("/") + "/api/v1/query?query=" + urllib.parse.quote(query)
         try:
             with urllib.request.urlopen(url, timeout=10) as resp:
@@ -295,11 +415,15 @@ def main() -> None:
     # --- 2. дашборды в файлы ---
     step("Дашборды групп")
     for g in cfg["groups"]:
-        dash, replaced, links = make_group_dashboard(base_dash, g["slug"], g["title"], g.get("location_filter"))
+        filters = group_filters(g)
+        dash, replaced, links = make_group_dashboard(
+            base_dash, g["slug"], g["title"],
+            g.get("location_filter"), sites=g.get("sites"))
         target_dir = os.path.join(install_dir, "grafana", "dashboards-groups", g["slug"])
         target = os.path.join(target_dir, f"{dash['uid']}.json")
-        matched = filter_matches(g["location_filter"]) if g.get("location_filter") else None
-        note = f"фильтр: {g['location_filter']!r}, замен: {replaced}, ссылок на свою копию: {links}"
+        matched = filter_matches(filters) if filters else None
+        note = (f"доступ: {describe_filters(filters)}, замен: {replaced}, "
+                f"ссылок на свою копию: {links}")
         if matched is not None:
             note += f", под фильтр попадает ИБП: {matched}"
         if args.dry_run:
@@ -311,9 +435,9 @@ def main() -> None:
                 fh.write("\n")
             log(f"{g['org']}: {target} ({note})")
         if matched == 0:
-            log(f"    ! ВНИМАНИЕ: под фильтр {g['location_filter']!r} не попал ни один ИБП — "
-                f"проверьте метки location в targets.yml (regex в PromQL анкорится целиком, "
-                f"для префикса нужен суффикс .*)")
+            log(f"    ! ВНИМАНИЕ: под фильтр {describe_filters(filters)} не попал ни один "
+                f"ИБП — проверьте метки site/location в targets.yml (regex в PromQL "
+                f"анкорится целиком, для префикса нужен суффикс .*)")
 
     # --- 3. провижининг ---
     step("Файлы провижининга")

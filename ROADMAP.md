@@ -39,6 +39,7 @@
 | — | Документация: README и 8 документов в `docs/` | `docs/` |
 | — | Шардинг опроса: `SNMP_SHARDS` (1..8 процессов `snmp_exporter`), рабочая конфигурация `data/prometheus.yml`, распределение в `status.sh` | `run.sh`, `.env`, `docs/scaling.md` |
 | — | Проверки в CI: семантика дашборда (id панелей, раскладка, ссылки, копии групп) и сверка версий в документации с `run.sh` | `tools/check-dashboard.py`, `tools/check-versions.py`, `.github/workflows/ci.yml` |
+| — | Территории: метка `site`, переменная «Площадка», колонка и сводка по площадкам на дашборде, доступ групп по списку площадок (`sites` в `groups.json`, с экранированием названий) | `targets.yml`, `tools/grafana-groups.py`, `grafana/dashboards/ups-overview.json`, [docs/access.md](docs/access.md) |
 
 Проверено на стенде (эмулятор SNMP → Prometheus → Grafana): правила срабатывают
 на нужных устройствах и не дают ложных, супервизор перезапускает упавший сервис,
