@@ -126,19 +126,48 @@ def inject_location_filter(obj, regex: str, path: str = "$") -> int:
     return changed
 
 
+def retarget_links(obj, old_uid: str, new_uid: str) -> int:
+    """Переписывает внутренние ссылки копии на неё саму: /d/<old> -> /d/<new>.
+
+    Копия дашборда живёт в отдельной организации группы, где дашборда с uid
+    базового (ups-overview) нет: без переадресации ссылка «Показать вкладку
+    этого ИБП» ведёт в никуда (Dashboard not found). Работает рекурсивно по
+    всему JSON — панельные data links, ссылки дашборда, ссылки на панели.
+    Возвращает число изменённых строк.
+    """
+    changed = 0
+    old = f"/d/{old_uid}"
+    new = f"/d/{new_uid}"
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            if isinstance(val, str) and old in val:
+                obj[key] = val.replace(old, new)
+                changed += 1
+            else:
+                changed += retarget_links(val, old_uid, new_uid)
+    elif isinstance(obj, list):
+        for val in obj:
+            changed += retarget_links(val, old_uid, new_uid)
+    return changed
+
+
 def make_group_dashboard(base: dict, slug: str, title: str, regex) -> tuple:
     dash = json.loads(json.dumps(base))  # глубокая копия
+    base_uid = dash.get("uid")
     dash["uid"] = f"ups-{slug}"
     dash["title"] = title
     dash["id"] = None
     dash["version"] = 0
     if "meta" in dash:
         del dash["meta"]
+    # Ссылки на базовый дашборд -> на саму копию (в организации группы
+    # существует только она).
+    links = retarget_links(dash, base_uid, dash["uid"]) if base_uid else 0
     n = 0
     if regex:
         n = inject_location_filter(dash, regex)
         dash["tags"] = sorted(set(dash.get("tags", []) + ["group", slug]))
-    return dash, n
+    return dash, n, links
 
 
 # ------------------------------------------------------------------ YAML
@@ -266,11 +295,11 @@ def main() -> None:
     # --- 2. дашборды в файлы ---
     step("Дашборды групп")
     for g in cfg["groups"]:
-        dash, replaced = make_group_dashboard(base_dash, g["slug"], g["title"], g.get("location_filter"))
+        dash, replaced, links = make_group_dashboard(base_dash, g["slug"], g["title"], g.get("location_filter"))
         target_dir = os.path.join(install_dir, "grafana", "dashboards-groups", g["slug"])
         target = os.path.join(target_dir, f"{dash['uid']}.json")
         matched = filter_matches(g["location_filter"]) if g.get("location_filter") else None
-        note = f"фильтр: {g['location_filter']!r}, замен: {replaced}"
+        note = f"фильтр: {g['location_filter']!r}, замен: {replaced}, ссылок на свою копию: {links}"
         if matched is not None:
             note += f", под фильтр попадает ИБП: {matched}"
         if args.dry_run:

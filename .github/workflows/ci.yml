@@ -25,9 +25,9 @@ jobs:
       - name: shellcheck
         run: shellcheck --severity=warning install.sh run.sh stop.sh status.sh tools/*.sh
 
-      - name: Синтаксис Python и JSON (tools/grafana-groups)
+      - name: Синтаксис Python и JSON (tools/)
         run: |
-          python3 -m py_compile tools/grafana-groups.py
+          python3 -m py_compile tools/*.py
           python3 -c "import json; c=json.load(open('tools/grafana-groups.example.json', encoding='utf-8')); assert c['groups']; [g[k] for g in c['groups'] for k in ('org','slug','title','location_filter','users')]; print('grafana-groups.example.json OK, групп:', len(c['groups']))"
 
       - name: Ротация логов по размеру (run.sh --rotate-now)
@@ -111,6 +111,16 @@ jobs:
         run: |
           jq -e . grafana/dashboards/ups-overview.json > /dev/null
           echo "dashboard JSON OK"
+
+      - name: Семантика дашборда (id, раскладка, ссылки, копии групп)
+        run: python3 tools/check-dashboard.py
+
+      - name: Версии в документации
+        run: python3 tools/check-versions.py
+
+      - name: CHANGELOG для тега
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python3 tools/check-versions.py --tag "$GITHUB_REF_NAME"
 
       - name: YAML (конфиги и provisioning)
         run: |

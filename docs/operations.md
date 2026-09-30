@@ -270,7 +270,7 @@ GF_VER="11.5.1"
 
 ```bash
 sudo rm -rf /opt/ups-monitoring-native/bin/prometheus-3.1.0.linux-amd64
-sudo vi /opt/ups-monitoring-native/run.sh          # PROM_VER="3.2.0"
+sudo vi /opt/ups-monitoring-native/run.sh          # вписать новую, например PROM_VER="3.2.0"
 sudo systemctl restart ups-monitoring
 ```
 

@@ -616,7 +616,8 @@
                   {
                     "title": "Показать вкладку этого ИБП",
                     "url": "/d/ups-overview/?var-instance=${__value.text}",
-                    "targetBlank": false
+                    "targetBlank": false,
+                    "keepTime": true
                   }
                 ]
               }
@@ -1492,69 +1493,6 @@
           ]
         },
         {
-          "id": 320,
-          "type": "stat",
-          "title": "Производитель",
-          "description": "upsIdentManufacturer — строку отдаёт сам ИБП (есть не у всех моделей).",
-          "gridPos": {
-            "h": 4,
-            "w": 4,
-            "x": 0,
-            "y": 30
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "decimals": 0,
-              "mappings": [],
-              "noValue": "—",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
-          },
-          "options": {
-            "colorMode": "none",
-            "graphMode": "none",
-            "justifyMode": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "name"
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "refId": "A",
-              "expr": "upsIdentManufacturer{job=\"snmp\", instance=~\"$instance\"}",
-              "instant": true,
-              "range": false,
-              "legendFormat": "{{upsIdentManufacturer}}"
-            }
-          ]
-        },
-        {
           "id": 321,
           "type": "stat",
           "title": "Модель",
@@ -1562,7 +1500,7 @@
           "gridPos": {
             "h": 4,
             "w": 4,
-            "x": 4,
+            "x": 0,
             "y": 30
           },
           "datasource": {
@@ -1625,7 +1563,7 @@
           "gridPos": {
             "h": 4,
             "w": 4,
-            "x": 8,
+            "x": 4,
             "y": 30
           },
           "datasource": {
@@ -1688,7 +1626,7 @@
           "gridPos": {
             "h": 4,
             "w": 4,
-            "x": 12,
+            "x": 8,
             "y": 30
           },
           "datasource": {
@@ -1744,69 +1682,6 @@
           ]
         },
         {
-          "id": 324,
-          "type": "stat",
-          "title": "Имя в ИБП",
-          "description": "upsIdentName — строку отдаёт сам ИБП (есть не у всех моделей).",
-          "gridPos": {
-            "h": 4,
-            "w": 4,
-            "x": 16,
-            "y": 30
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "decimals": 0,
-              "mappings": [],
-              "noValue": "—",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
-          },
-          "options": {
-            "colorMode": "none",
-            "graphMode": "none",
-            "justifyMode": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "name"
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "refId": "A",
-              "expr": "upsIdentName{job=\"snmp\", instance=~\"$instance\"}",
-              "instant": true,
-              "range": false,
-              "legendFormat": "{{upsIdentName}}"
-            }
-          ]
-        },
-        {
           "id": 325,
           "type": "stat",
           "title": "Сбоев входа",
@@ -1814,7 +1689,7 @@
           "gridPos": {
             "h": 4,
             "w": 4,
-            "x": 20,
+            "x": 12,
             "y": 30
           },
           "datasource": {
