@@ -1470,217 +1470,445 @@
       ]
     },
     {
-      "id": 201,
-      "type": "state-timeline",
-      "title": "Доступность ИБП, 24 часа",
-      "description": "Зелёная полоса — ИБП отвечает по SNMP, красная — опрос не проходит.",
+      "id": 203,
+      "type": "table",
+      "title": "Отчёт за период",
+      "description": "Числа за период, выбранный в правом верхнем углу — сутки, неделя, месяц. Доступность считается по имеющимся замерам: если ИБП добавили недавно, время до этого в расчёт не попадает. Столбцы сортируются щелчком по заголовку; выгрузка — меню панели → Inspect → Download CSV.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "gridPos": {
         "h": 7,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 26
       },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
           "custom": {
-            "fillOpacity": 70,
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
             },
-            "insertNulls": false,
-            "lineWidth": 0,
-            "spanNulls": false
+            "filterable": true,
+            "inspect": false
           },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "нет связи",
-                  "color": "red",
-                  "index": 0
-                },
-                "1": {
-                  "text": "в сети",
-                  "color": "green",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "noValue": "нет данных",
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "alignValue": "left",
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A",
-          "expr": "up{job=\"snmp\", site=~\"$site\"}",
-          "instant": false,
-          "range": true,
-          "legendFormat": "{{instance}}"
-        }
-      ]
-    },
-    {
-      "id": 202,
-      "type": "state-timeline",
-      "title": "Источник питания, 24 часа",
-      "description": "Когда каждый ИБП переходил на батарею (красное), байпас (жёлтое) или обратно на сеть.",
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 26
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "fillOpacity": 70,
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ИБП"
             },
-            "insertNulls": false,
-            "lineWidth": 0,
-            "spanNulls": false
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Показать вкладку этого ИБП",
+                    "url": "/d/ups-overview/?var-instance=${__value.text}",
+                    "targetBlank": false,
+                    "keepTime": true
+                  }
+                ]
+              }
+            ]
           },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "другое",
-                  "color": "purple",
-                  "index": 0
-                },
-                "2": {
-                  "text": "нет источника",
-                  "color": "gray",
-                  "index": 1
-                },
-                "3": {
-                  "text": "от сети",
-                  "color": "green",
-                  "index": 2
-                },
-                "4": {
-                  "text": "байпас",
-                  "color": "yellow",
-                  "index": 3
-                },
-                "5": {
-                  "text": "от батареи",
-                  "color": "red",
-                  "index": 4
-                },
-                "6": {
-                  "text": "booster",
-                  "color": "blue",
-                  "index": 5
-                },
-                "7": {
-                  "text": "reducer",
-                  "color": "blue",
-                  "index": 6
-                },
-                "8": {
-                  "text": "низкий заряд",
-                  "color": "red",
-                  "index": 7
-                },
-                "9": {
-                  "text": "на байпасе",
-                  "color": "orange",
-                  "index": 8
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Доступность, %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 98
+                    },
+                    {
+                      "color": "green",
+                      "value": 99.5
+                    }
+                  ]
                 }
               }
-            }
-          ],
-          "noValue": "нет данных",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Без связи, мин"
+            },
+            "properties": [
               {
-                "color": "green",
-                "value": null
+                "id": "unit",
+                "value": "m"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 15
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "На батарее, мин"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "m"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 60
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Переходов"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Мин. заряд, %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 20
+                    },
+                    {
+                      "color": "green",
+                      "value": 50
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Макс. нагрузка, %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 70
+                    },
+                    {
+                      "color": "red",
+                      "value": 90
+                    }
+                  ]
+                }
               }
             ]
           }
-        },
-        "overrides": []
+        ]
       },
       "options": {
-        "alignValue": "left",
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
         },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showHeader": true
       },
       "targets": [
         {
+          "refId": "A",
+          "expr": "avg by (instance, site) (avg_over_time(up{job=\"snmp\", site=~\"$site\"}[$__range])) * 100",
+          "format": "table",
+          "instant": true,
+          "legendFormat": null,
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          },
-          "refId": "A",
-          "expr": "max by (instance) (upsOutputSource{job=\"snmp\", site=~\"$site\"})",
-          "instant": false,
-          "range": true,
-          "legendFormat": "{{instance}}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "(1 - avg by (instance) (avg_over_time(up{job=\"snmp\", site=~\"$site\"}[$__range]))) * $__range_s / 60",
+          "format": "table",
+          "instant": true,
+          "legendFormat": null,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "avg by (instance) (avg_over_time((upsOutputSource{job=\"snmp\", site=~\"$site\"} == bool 5)[$__range:1m])) * $__range_s / 60",
+          "format": "table",
+          "instant": true,
+          "legendFormat": null,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "D",
+          "expr": "ceil(max by (instance) (changes((upsOutputSource{job=\"snmp\", site=~\"$site\"} == bool 5)[$__range:1m])) / 2)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": null,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "E",
+          "expr": "min by (instance) (min_over_time(upsEstimatedChargeRemaining{job=\"snmp\", site=~\"$site\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": null,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "F",
+          "expr": "max by (instance) (max_over_time(upsOutputPercentLoad{job=\"snmp\", site=~\"$site\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": null,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "byVariable": false,
+            "include": {
+              "names": [
+                "instance",
+                "site",
+                "Value #A",
+                "Value #B",
+                "Value #C",
+                "Value #D",
+                "Value #E",
+                "Value #F"
+              ]
+            }
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "instance",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "instance": 0,
+              "site": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 6,
+              "Value #F": 7
+            },
+            "renameByName": {
+              "instance": "ИБП",
+              "site": "Площадка",
+              "Value #A": "Доступность, %",
+              "Value #B": "Без связи, мин",
+              "Value #C": "На батарее, мин",
+              "Value #D": "Переходов",
+              "Value #E": "Мин. заряд, %",
+              "Value #F": "Макс. нагрузка, %"
+            }
+          }
         }
       ]
     },

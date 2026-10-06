@@ -188,10 +188,14 @@ jobs:
                       base, slug, 'CI', regex, sites=sites)
                   walk(copy['panels'])
 
-          # переменные Grafana -> значения, чтобы выражение стало валидным PromQL
+          # переменные Grafana -> значения, чтобы выражение стало валидным PromQL.
+          # $__range_s обязательно раньше $__range: иначе от «$__range_s»
+          # останется «24h_s» и promtool не разберёт выражение.
           uniq = sorted({re.sub(r'\s+', ' ', e).replace('$ups', 'UPS-01')
                          .replace('$site', 'Площадка №1')
-                         .replace('$instance', '192.168.1.10') for e in exprs})
+                         .replace('$instance', '192.168.1.10')
+                         .replace('$__range_s', '86400')
+                         .replace('$__range', '24h') for e in exprs})
           lines = ['groups:', '  - name: dashboard', '    rules:']
           for i, expr in enumerate(uniq):
               lines += [f'      - record: check_{i:03d}', f"        expr: '{expr}'"]

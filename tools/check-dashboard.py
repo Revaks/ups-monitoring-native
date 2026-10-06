@@ -218,6 +218,76 @@ def check_group_copies(module, dashes: dict, errors: list) -> int:
     return checked
 
 
+# Отчёт за период приходит на смену таймлайнам состояния. Таймлайн информативен
+# только когда состояние меняется: на здоровом парке он рисует сплошную зелёную
+# заливку, то есть не сообщает ничего. Отчёт даёт числа за выбранный период.
+REPORT_TITLE = "Отчёт за период"
+
+# Колонки отчёта: человекочитаемое имя -> подстрока в выражении панели.
+REPORT_COLUMNS = (
+    ("доступность за период", 'avg_over_time(up{job="snmp"'),
+    ("доступность в процентах", "* 100"),
+    ("минуты на батарее", 'avg_over_time((upsOutputSource{job="snmp"'),
+    # Переходов должно быть целым: changes() считает смены состояния, а эпизод
+    # на батарее даёт две смены (ушёл и вернулся). Без округления вверх в
+    # отчёте появляется «2,5 перехода» — число, которого не бывает.
+    ("переходы на батарею", "ceil(max by (instance) (changes((upsOutputSource"),
+    ("минимальный заряд", "min_over_time(upsEstimatedChargeRemaining"),
+    ("максимальная нагрузка", "max_over_time(upsOutputPercentLoad"),
+)
+
+# Панели-таймлайны, которые отчёт заменяет.
+REPLACED_PANELS = ("Доступность ИБП, 24 часа", "Источник питания, 24 часа")
+
+
+def find_panel(panels, title):
+    """Панель по заголовку на любом уровне вложенности (внутри строк тоже)."""
+    for panel in panels:
+        if panel.get("title") == title:
+            return panel
+        found = find_panel(panel.get("panels") or [], title)
+        if found is not None:
+            return found
+    return None
+
+
+def check_report(name: str, dash: dict, errors: list) -> None:
+    """Дашборд должен давать отчёт за период, а не только текущее состояние."""
+    panels = dash.get("panels") or []
+
+    for old_title in REPLACED_PANELS:
+        if find_panel(panels, old_title) is not None:
+            errors.append(
+                f"{name}: панель «{old_title}» осталась — на здоровом парке она "
+                f"показывает сплошную заливку вместо отчётности "
+                f"(замена — «{REPORT_TITLE}»)"
+            )
+
+    panel = find_panel(panels, REPORT_TITLE)
+    if panel is None:
+        errors.append(f"{name}: нет панели «{REPORT_TITLE}»")
+        return
+
+    if panel.get("type") != "table":
+        errors.append(
+            f"{name}: «{REPORT_TITLE}» имеет тип {panel.get('type')!r}, "
+            f"ожидается table — отчёт читают по столбцам"
+        )
+
+    joined = " ".join(t.get("expr") or "" for t in panel.get("targets") or [])
+    for label, marker in REPORT_COLUMNS:
+        if marker not in joined:
+            errors.append(f"{name}: в «{REPORT_TITLE}» нет колонки «{label}»")
+
+    # Период обязан браться из выбора времени Grafana, иначе отчёт нельзя
+    # посчитать «за сутки», «за неделю» или «за месяц».
+    if "$__range" not in joined:
+        errors.append(
+            f"{name}: «{REPORT_TITLE}» не использует $__range — отчёт не будет "
+            f"пересчитываться при смене периода"
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Семантические проверки дашбордов Grafana")
     ap.add_argument("--dir", default=str(REPO / "grafana" / "dashboards"),
@@ -254,6 +324,7 @@ def main() -> int:
         ids: dict = {}
         collect_ids(dash.get("panels") or [], ids, errors, name)
         panels_total += check_container(name, dash.get("panels") or [], errors)
+        check_report(name, dash, errors)
 
     for name, dash in dashes.items():
         links_total += check_links(name, dash, set(uids), errors)
