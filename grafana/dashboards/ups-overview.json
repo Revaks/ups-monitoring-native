@@ -23,9 +23,9 @@
       "title": "Монитор · тёмная",
       "type": "link",
       "icon": "dashboard",
-      "tooltip": "Режим киоска для настенного монитора: без меню, переменных и выбора времени, автообновление 30 с",
-      "url": "/d/ups-overview/ups-overview?orgId=1&kiosk&_dash.hideTimePicker&_dash.hideVariables&_dash.hideLinks&refresh=30s&theme=dark",
-      "targetBlank": false,
+      "tooltip": "Открывает экран для настенного монитора в новой вкладке: режим киоска, без переменных и выбора времени, обновление 30 с",
+      "url": "/d/ups-overview/ups-overview?orgId=1&kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=dark",
+      "targetBlank": true,
       "includeVars": true,
       "keepTime": false,
       "asDropdown": false,
@@ -36,8 +36,8 @@
       "type": "link",
       "icon": "dashboard",
       "tooltip": "То же в светлой теме — для ярко освещённого помещения",
-      "url": "/d/ups-overview/ups-overview?orgId=1&kiosk&_dash.hideTimePicker&_dash.hideVariables&_dash.hideLinks&refresh=30s&theme=light",
-      "targetBlank": false,
+      "url": "/d/ups-overview/ups-overview?orgId=1&kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=light",
+      "targetBlank": true,
       "includeVars": true,
       "keepTime": false,
       "asDropdown": false,
@@ -552,7 +552,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "sort_desc(topk(8, (\nmax by (instance, site) (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 5) * 0 + 50\nor max by (instance, site) (upsBatteryStatus{job=\"snmp\", site=~\"$site\"} >= 3) * 0 + 40\nor max by (instance, site) ((up{job=\"snmp\", site=~\"$site\"} == 0) and on (instance) (max_over_time(up{job=\"snmp\", site=~\"$site\"}[1d]) == 1)) * 0 + 30\nor max by (instance, site) (upsOutputPercentLoad{job=\"snmp\", site=~\"$site\"} > 85) * 0 + 24\nor max by (instance, site) (upsBatteryTemperature{job=\"snmp\", site=~\"$site\"} > 40) * 0 + 23\nor max by (instance, site) ((upsOutputSource{job=\"snmp\", site=~\"$site\"} == 4) or (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 9)) * 0 + 22\nor max by (instance, site) (upsAlarmsPresent{job=\"snmp\", site=~\"$site\"} > 0) * 0 + 21\n) > 0))",
+          "expr": "label_replace(sort_desc(topk(8, (\nmax by (instance, site) (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 5) * 0 + 50\nor max by (instance, site) (upsBatteryStatus{job=\"snmp\", site=~\"$site\"} >= 3) * 0 + 40\nor max by (instance, site) ((up{job=\"snmp\", site=~\"$site\"} == 0) and on (instance) (max_over_time(up{job=\"snmp\", site=~\"$site\"}[1d]) == 1)) * 0 + 30\nor max by (instance, site) (upsOutputPercentLoad{job=\"snmp\", site=~\"$site\"} > 85) * 0 + 24\nor max by (instance, site) (upsBatteryTemperature{job=\"snmp\", site=~\"$site\"} > 40) * 0 + 23\nor max by (instance, site) ((upsOutputSource{job=\"snmp\", site=~\"$site\"} == 4) or (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 9)) * 0 + 22\nor max by (instance, site) (upsAlarmsPresent{job=\"snmp\", site=~\"$site\"} > 0) * 0 + 21\n) > 0)), \"site\", \"без площадки\", \"site\", \"\")",
           "instant": true,
           "range": false,
           "legendFormat": "{{instance}} · {{site}}"
@@ -668,7 +668,7 @@
       "title": "Парк",
       "description": "Плитка на каждый ИБП. Цвет — состояние: серый — в норме, коричневый — давно без связи, жёлтый — новое «нет связи», перегрузка, перегрев, байпас или тревога, красный — от батареи или низкий заряд.",
       "gridPos": {
-        "h": 11,
+        "h": 10,
         "w": 24,
         "x": 0,
         "y": 16
@@ -792,7 +792,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 26
       }
     },
     {
@@ -804,7 +804,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 27
       },
       "datasource": {
         "type": "prometheus",
@@ -1070,7 +1070,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 35
       }
     },
     {
@@ -1082,7 +1082,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 36
       },
       "datasource": {
         "type": "prometheus",
@@ -1696,7 +1696,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 47
       },
       "fieldConfig": {
         "defaults": {
@@ -2135,7 +2135,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 54
       },
       "panels": [
         {
@@ -2147,7 +2147,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 56
+            "y": 55
           },
           "datasource": {
             "type": "prometheus",
@@ -2241,7 +2241,7 @@
             "h": 3,
             "w": 6,
             "x": 0,
-            "y": 60
+            "y": 59
           },
           "datasource": {
             "type": "prometheus",
@@ -2304,7 +2304,7 @@
             "h": 3,
             "w": 6,
             "x": 6,
-            "y": 60
+            "y": 59
           },
           "datasource": {
             "type": "prometheus",
@@ -2367,7 +2367,7 @@
             "h": 3,
             "w": 6,
             "x": 12,
-            "y": 60
+            "y": 59
           },
           "datasource": {
             "type": "prometheus",
@@ -2430,7 +2430,7 @@
             "h": 3,
             "w": 6,
             "x": 18,
-            "y": 60
+            "y": 59
           },
           "datasource": {
             "type": "prometheus",
@@ -2492,7 +2492,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 63
+            "y": 62
           },
           "datasource": {
             "type": "prometheus",
@@ -2784,14 +2784,14 @@
                     "width": 2
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 10,
-                    "top": 16,
-                    "width": 270,
-                    "height": 130,
+                    "left": 1.05,
+                    "right": 70.53,
+                    "top": 5.93,
+                    "bottom": 45.93,
                     "rotation": 0
                   },
                   "connections": [
@@ -2844,14 +2844,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 26,
-                    "top": 24,
-                    "width": 240,
-                    "height": 26,
+                    "left": 2.74,
+                    "right": 72,
+                    "top": 8.89,
+                    "bottom": 81.48,
                     "rotation": 0
                   },
                   "connections": []
@@ -2883,14 +2883,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 26,
-                    "top": 58,
-                    "width": 240,
-                    "height": 56,
+                    "left": 2.74,
+                    "right": 72,
+                    "top": 21.48,
+                    "bottom": 60.74,
                     "rotation": 0
                   },
                   "connections": []
@@ -2904,7 +2904,7 @@
                     "color": {
                       "fixed": "#E6E7EE"
                     },
-                    "size": 34,
+                    "size": 28,
                     "text": {
                       "mode": "field",
                       "field": "Источник",
@@ -2925,14 +2925,14 @@
                     "width": 2
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 340,
-                    "top": 16,
-                    "width": 270,
-                    "height": 130,
+                    "left": 35.79,
+                    "right": 35.79,
+                    "top": 5.93,
+                    "bottom": 45.93,
                     "rotation": 0
                   },
                   "connections": [
@@ -3005,14 +3005,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 356,
-                    "top": 24,
-                    "width": 240,
-                    "height": 26,
+                    "left": 37.47,
+                    "right": 37.26,
+                    "top": 8.89,
+                    "bottom": 81.48,
                     "rotation": 0
                   },
                   "connections": []
@@ -3045,14 +3045,14 @@
                     "width": 2
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 670,
-                    "top": 16,
-                    "width": 270,
-                    "height": 130,
+                    "left": 70.53,
+                    "right": 1.05,
+                    "top": 5.93,
+                    "bottom": 45.93,
                     "rotation": 0
                   },
                   "connections": []
@@ -3083,14 +3083,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 686,
-                    "top": 24,
-                    "width": 240,
-                    "height": 26,
+                    "left": 72.21,
+                    "right": 2.53,
+                    "top": 8.89,
+                    "bottom": 81.48,
                     "rotation": 0
                   },
                   "connections": []
@@ -3122,14 +3122,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 686,
-                    "top": 58,
-                    "width": 240,
-                    "height": 56,
+                    "left": 72.21,
+                    "right": 2.53,
+                    "top": 21.48,
+                    "bottom": 60.74,
                     "rotation": 0
                   },
                   "connections": []
@@ -3162,14 +3162,14 @@
                     "width": 2
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 340,
-                    "top": 176,
-                    "width": 270,
-                    "height": 90,
+                    "left": 35.79,
+                    "right": 35.79,
+                    "top": 65.19,
+                    "bottom": 1.48,
                     "rotation": 0
                   },
                   "connections": []
@@ -3200,14 +3200,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 356,
-                    "top": 182,
-                    "width": 120,
-                    "height": 26,
+                    "left": 37.47,
+                    "right": 49.89,
+                    "top": 67.41,
+                    "bottom": 22.96,
                     "rotation": 0
                   },
                   "connections": []
@@ -3221,7 +3221,7 @@
                     "color": {
                       "fixed": "#E6E7EE"
                     },
-                    "size": 28,
+                    "size": 24,
                     "text": {
                       "mode": "field",
                       "field": "Заряд, %",
@@ -3239,14 +3239,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 356,
-                    "top": 206,
-                    "width": 120,
-                    "height": 56,
+                    "left": 37.47,
+                    "right": 50.95,
+                    "top": 76.3,
+                    "bottom": 5.93,
                     "rotation": 0
                   },
                   "connections": []
@@ -3260,7 +3260,7 @@
                     "color": {
                       "fixed": "#E6E7EE"
                     },
-                    "size": 28,
+                    "size": 24,
                     "text": {
                       "mode": "field",
                       "field": "Остаток, мин",
@@ -3278,14 +3278,14 @@
                     }
                   },
                   "constraint": {
-                    "horizontal": "left",
-                    "vertical": "top"
+                    "horizontal": "scale",
+                    "vertical": "scale"
                   },
                   "placement": {
-                    "left": 476,
-                    "top": 206,
-                    "width": 130,
-                    "height": 56,
+                    "left": 49.05,
+                    "right": 36.21,
+                    "top": 76.3,
+                    "bottom": 5.93,
                     "rotation": 0
                   },
                   "connections": []
@@ -3382,7 +3382,7 @@
             "h": 4,
             "w": 6,
             "x": 12,
-            "y": 63
+            "y": 62
           },
           "datasource": {
             "type": "prometheus",
@@ -3456,7 +3456,7 @@
             "h": 4,
             "w": 6,
             "x": 18,
-            "y": 63
+            "y": 62
           },
           "datasource": {
             "type": "prometheus",
@@ -3530,7 +3530,7 @@
             "h": 4,
             "w": 6,
             "x": 12,
-            "y": 67
+            "y": 66
           },
           "datasource": {
             "type": "prometheus",
@@ -3604,7 +3604,7 @@
             "h": 4,
             "w": 6,
             "x": 18,
-            "y": 67
+            "y": 66
           },
           "datasource": {
             "type": "prometheus",
@@ -3678,7 +3678,7 @@
             "h": 3,
             "w": 3,
             "x": 0,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -3763,7 +3763,7 @@
             "h": 3,
             "w": 3,
             "x": 3,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -3879,7 +3879,7 @@
             "h": 3,
             "w": 3,
             "x": 6,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -3948,7 +3948,7 @@
             "h": 3,
             "w": 3,
             "x": 9,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -4013,7 +4013,7 @@
             "h": 3,
             "w": 3,
             "x": 12,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -4078,7 +4078,7 @@
             "h": 3,
             "w": 3,
             "x": 15,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -4143,7 +4143,7 @@
             "h": 3,
             "w": 3,
             "x": 18,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -4216,7 +4216,7 @@
             "h": 3,
             "w": 3,
             "x": 21,
-            "y": 71
+            "y": 70
           },
           "datasource": {
             "type": "prometheus",
@@ -4285,7 +4285,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 74
+            "y": 73
           },
           "datasource": {
             "type": "prometheus",
@@ -4435,7 +4435,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 74
+            "y": 73
           },
           "datasource": {
             "type": "prometheus",
@@ -4527,7 +4527,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 82
+            "y": 81
           },
           "datasource": {
             "type": "prometheus",
@@ -4630,7 +4630,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 82
+            "y": 81
           },
           "datasource": {
             "type": "prometheus",
@@ -4730,7 +4730,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 90
+            "y": 89
           },
           "datasource": {
             "type": "prometheus",
@@ -4855,7 +4855,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 90
+            "y": 89
           },
           "datasource": {
             "type": "prometheus",

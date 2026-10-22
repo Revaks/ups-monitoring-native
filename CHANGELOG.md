@@ -13,6 +13,50 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 Список версий: [Releases](https://github.com/Revaks/ups-monitoring-native/releases)
 и `git tag -l`. Что именно поменялось — ниже.
 
+## [1.7.1] — 2026-10-22
+
+### Исправлено
+
+* **Кнопки «Монитор» не переключали тему, а сами пропадали.** Grafana 11 открывает
+  ссылку на тот же дашборд без перезагрузки страницы, а тему из ссылки (`theme=`)
+  применяет только при полной загрузке: режим киоска включался, тема — только
+  после Ctrl+F5. Кнопки теперь открывают экран монитора в новой вкладке — это
+  полная загрузка, тема применяется сразу (проверено на Grafana 11.5.1 в обе
+  стороны). Из ссылки убран `_dash.hideLinks`: кнопки остаются видны и в режиме
+  монитора, тему можно переключить прямо там. Чтобы экран с кнопками по-прежнему
+  помещался в 1080 px, «Парк» стал на строку ниже.
+* **Схема питания обрезалась на узких экранах.** Блоки панели Canvas стояли в
+  пикселях под ширину 1920: на ноутбуке (1366 px) блок «Нагрузка» уходил за край,
+  а рамка «Батареи» подрезалась и на 1920. Схема теперь масштабируется под
+  ширину панели.
+* **«Требует внимания» у ИБП без метки `site`** подписывался «UPS-01 · » с висящей
+  точкой — теперь «UPS-01 · без площадки».
+
+**Обновление с 1.7.0.** Меняются `grafana/dashboards/ups-overview.json`,
+`docs/dashboard.md` и `CHANGELOG.md`; Grafana перечитает дашборд сама за ~30 с.
+Если ссылка монитора уже сохранена в автозапуске с `&_dash.hideLinks`, она
+продолжит работать как раньше (без кнопок).
+
+**Откат.** Полный откат — установщик с тегом 1.7.0:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/install.sh \
+  | sudo bash -s -- --yes --ref v1.7.0
+```
+
+Если нужен только прежний дашборд, достаточно одного файла: `run.sh`,
+`install.sh`, `prometheus.yml`, `snmp.yml`, правила алертов, `.env` и
+`targets.yml` в 1.7.1 не менялись. Из клона репозитория:
+
+```bash
+git show v1.7.0:grafana/dashboards/ups-overview.json \
+  | sudo tee /opt/ups-monitoring-native/grafana/dashboards/ups-overview.json >/dev/null
+```
+
+Откат не требует миграций: `uid` (`ups-overview`), переменные «Площадка»/«ИБП»,
+таблица парка и отчёт за период не менялись, история Prometheus и база Grafana не
+затрагиваются. После смены дашборда страницы групп пересоберите тем же скриптом.
+
 ## [1.7.0] — 2026-10-22
 
 ### Изменено
@@ -552,6 +596,7 @@ Prometheus + Grafana обычными процессами.
 * `install.sh`: установка на сервер одной командой, проверка sha256, автозапуск
   через systemd, интерактивная настройка и флаги.
 
+[1.7.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.7.1
 [1.7.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.7.0
 [1.6.1]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.6.1
 [1.6.0]: https://github.com/Revaks/ups-monitoring-native/releases/tag/v1.6.0

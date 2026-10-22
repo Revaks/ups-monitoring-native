@@ -168,7 +168,7 @@ Grafana — по умолчанию `data/`, вынесенный `DATA_DIR` у�
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/install.sh \
-  | sudo bash -s -- --yes --ref v1.6.1
+  | sudo bash -s -- --yes --ref v1.7.0
 ```
 
 Данные при откате не теряются: `.env` (пароль Grafana, токен Telegram), `targets.yml`
@@ -179,15 +179,16 @@ curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/i
 не требует миграций; на сервере до 1.2.0 новый дашборд работает, но без колонки
 IP и без панелей идентификации (см. [docs/dashboard.md](dashboard.md)).
 
-С 1.7.0 на 1.6.1 полный установщик не обязателен: в 1.7.0 менялся только дашборд,
-поэтому достаточно вернуть один файл — команда ниже. После смены дашборда в любую
-сторону пересоберите страницы групп (`tools/grafana-groups.py`).
+С 1.7.1 на 1.7.0 полный установщик не обязателен: в 1.7.1 менялся только дашборд,
+поэтому достаточно вернуть один файл — команда ниже. Для отката на более старую
+версию подставьте её тег. После смены дашборда в любую сторону пересоберите
+страницы групп (`tools/grafana-groups.py`).
 
 Отдельно откатить только дашборд, не меняя версию, тоже можно — это обычный файл:
 
 ```bash
 # из клона репозитория: вернуть дашборд конкретной версии
-git show v1.6.1:grafana/dashboards/ups-overview.json \
+git show v1.7.0:grafana/dashboards/ups-overview.json \
   | sudo tee /opt/ups-monitoring-native/grafana/dashboards/ups-overview.json >/dev/null
 ```
 
