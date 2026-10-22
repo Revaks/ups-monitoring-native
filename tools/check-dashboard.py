@@ -37,6 +37,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 GRID_MAX_WIDTH = 24                      # ширина сетки Grafana в клетках
 DEFAULT_DATASOURCES = ("prometheus",)    # uid источников, допустимых в дашбордах
+# Панели без запросов к источнику данных: список алертов читает правила самой
+# Grafana. У них нет datasource и targets — проверка источника к ним не относится.
+NO_QUERY_PANELS = ("row", "alertlist")
 LINK_RE = re.compile(r"/d/([A-Za-z0-9\-_]+)")
 
 
@@ -70,7 +73,7 @@ def check_container(name: str, panels: list, errors: list, place: str = "") -> i
         title = panel.get("title") or panel.get("type") or "?"
         here = f"{place}[{idx}]" if place else f"[{idx}]"
 
-        if panel.get("type") != "row":
+        if panel.get("type") not in NO_QUERY_PANELS or panel.get("targets"):
             ds = panel.get("datasource")
             uid = ds.get("uid") if isinstance(ds, dict) else ds
             if uid not in DEFAULT_DATASOURCES:
