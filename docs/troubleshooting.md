@@ -196,43 +196,23 @@ Grafana помнит числовой `dashboard_id` для каждого фа�
 запустить стек. Файлы и остальные группы не трогаются.
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/Revaks/ups-monitoring-native/main/tools/fix-provisioning.py \
+  -o /tmp/fix-provisioning.py
+
 sudo systemctl stop ups-monitoring
-
-sudo python3 - <<'PY'
-import glob, os, shutil, sqlite3, time
-
-target = '/lowvoltage/ups-lowvoltage.json'   # ← путь проблемного файла
-dbs = set(glob.glob('/var/lib/prometheus/ups-monitoring/**/grafana.db', recursive=True))
-dbs |= set(glob.glob('/opt/ups-monitoring-native/**/grafana.db', recursive=True))
-dbs = [p for p in dbs if os.path.isfile(p)]
-print('DB:', dbs)
-
-for db in dbs:
-    con = sqlite3.connect(db)
-    con.row_factory = sqlite3.Row
-    rows = con.execute('''
-        select p.id as prov_id, p.dashboard_id, p.external_id,
-               d.id as dash_id, d.uid, d.org_id, d.folder_id, d.deleted
-        from dashboard_provisioning p
-        left join dashboard d on d.id = p.dashboard_id
-        where p.external_id like ?
-    ''', ('%' + target,)).fetchall()
-    for r in rows:
-        print(' ', dict(r))
-    stale = [r['prov_id'] for r in rows if r['dash_id'] is None]
-    if stale:
-        backup = db + '.bak-' + time.strftime('%Y%m%d-%H%M%S')
-        shutil.copy2(db, backup)
-        con.executemany('delete from dashboard_provisioning where id = ?',
-                        [(i,) for i in stale])
-        con.commit()
-        print('deleted:', stale, 'backup:', backup)
-    else:
-        print('stale rows: none')
-    con.close()
-PY
-
+sudo python3 /tmp/fix-provisioning.py          # только показать, что нашёл
+sudo python3 /tmp/fix-provisioning.py --fix    # удалить битые записи (с бэкапом)
 sudo systemctl start ups-monitoring
+```
+
+По умолчанию скрипт проверяет файл `lowvoltage/ups-lowvoltage.json`. Для другой
+группы укажите её файл и uid:
+
+```bash
+sudo python3 /tmp/fix-provisioning.py \
+  --target '/electricians/ups-electricians.json' \
+  --uid ups-electricians \
+  --org 'Служба Электриков' --fix
 ```
 
 ## Опрос стал медленным, в логах таймауты
