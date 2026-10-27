@@ -183,6 +183,17 @@ def check_one_copy(module, name: str, dash: dict, slug: str, regex, sites,
     if copy.get("uid") != expected_uid:
         errors.append(f"{copy_name}: uid копии {copy.get('uid')!r} вместо {expected_uid!r}")
 
+    # Провижининг сам назначает id и папку. Если в JSON остался числовой id
+    # (например, из экспорта дашборда), Grafana пытается обновить
+    # несуществующий дашборд и падает с «Dashboard not found» — обзор
+    # группы так и не появляется, хотя файл на месте.
+    for key in ("id", "folderId", "folderUid"):
+        if key in copy:
+            errors.append(
+                f"{copy_name}: в копии остался ключ {key!r} — провижининг "
+                f"Grafana может ответить «Dashboard not found»"
+            )
+
     # В организации группы нет ни одного базового дашборда: после копирования
     # не должно остаться ссылок ни на обзор, ни на монитор из Main Org.
     # Сравниваем uid целиком: `/d/ups-monitor/...` — префикс для

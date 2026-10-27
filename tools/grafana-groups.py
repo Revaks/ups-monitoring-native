@@ -342,10 +342,13 @@ def make_group_dashboard(base: dict, slug: str, title: str, regex=None,
     base_uid = dash.get("uid")
     dash["uid"] = uid or group_dashboard_uid(base_uid, slug)
     dash["title"] = title
-    dash["id"] = None
+    # Провижининг сам управляет id и папкой. Если оставить старый id
+    # (например, из экспорта дашборда), Grafana пытается обновить
+    # несуществующий дашборд и падает с «Dashboard not found». Поэтому
+    # служебные ключи не пишем вообще, а не выставляем в null.
+    for key in ("id", "folderId", "folderUid", "meta"):
+        dash.pop(key, None)
     dash["version"] = 0
-    if "meta" in dash:
-        del dash["meta"]
     # Ссылки на базовые дашборды -> на копии этой организации. uid_map
     # передаётся, когда копий несколько (обзор + монитор): тогда каждая
     # копия ссылается на свою пару, а не на Main Org.
