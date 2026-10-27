@@ -580,13 +580,24 @@ def main() -> None:
                 log(f"{login}: БУДЕТ создан в «{g['org']}»")
                 continue
             password = u.get("password") or gen_password()
-            res = api.call("POST", "/api/admin/users", {
-                "name": u.get("name", login),
-                "email": u.get("email", f"{login}@example.local"),
-                "login": login,
-                "password": password,
-                "OrgId": g["orgId"],
-            })
+            try:
+                res = api.call("POST", "/api/admin/users", {
+                    "name": u.get("name", login),
+                    "email": u.get("email", f"{login}@example.local"),
+                    "login": login,
+                    "password": password,
+                    "OrgId": g["orgId"],
+                })
+            except SystemExit as exc:
+                # Grafana отвечает 412, если пользователь уже есть, но lookup
+                # его не нашёл (например, совпал email при другом логине).
+                # Не валим весь прогон: дашборды уже записаны, важнее дойти
+                # до перезапуска и домашних страниц.
+                if "HTTP 412" not in str(exc):
+                    raise
+                log(f"{login}: уже существует в Grafana — пропускаю "
+                    f"(проверьте, что он в «{g['org']}»)")
+                continue
             created.append((login, password, g["org"]))
             # пароль печатаем сразу: если скрипт упадёт на следующих шагах,
             # он не потеряется (итоговая сводка идёт в самом конце)
