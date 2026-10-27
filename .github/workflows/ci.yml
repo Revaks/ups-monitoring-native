@@ -117,12 +117,14 @@ jobs:
           [ -s "$RUNNER_TEMP/rotate.log" ] \
             || { echo "::error::ротатор ничего не сделал"; exit 1; }
 
-      - name: JSON дашборда Grafana
+      - name: JSON дашбордов Grafana
         run: |
-          jq -e . grafana/dashboards/ups-overview.json > /dev/null
-          echo "dashboard JSON OK"
+          for f in grafana/dashboards/*.json; do
+            jq -e . "$f" > /dev/null
+            echo "$f: JSON OK"
+          done
 
-      - name: Семантика дашборда (id, раскладка, ссылки, копии групп)
+      - name: Семантика дашбордов (id, раскладка, ссылки, копии групп)
         run: python3 tools/check-dashboard.py
 
       - name: Версии в документации

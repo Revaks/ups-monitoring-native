@@ -7,11 +7,14 @@
 #    1. создаёт организации Grafana по списку из groups.json;
 #    2. раскладывает файлы провижининга: свой Prometheus-датасорс в каждой
 #       организации и свой провайдер дашбордов (папка = страница группы);
-#    3. генерирует дашборд группы из штатного ups-overview.json, подставляя
-#       в запросы фильтр доступа: список площадок (метка site) и/или ручной
-#       regex по метке location — у электриков видны только ИБП их территорий;
+#    3. генерирует дашборды группы из штатных ups-overview.json и (если у
+#       группы "monitor": true) ups-monitor.json, подставляя в запросы фильтр
+#       доступа: список площадок (метка site) и/или ручной regex по метке
+#       location — у электриков видны только ИБП их территорий;
 #    4. создаёт локальные аккаунты с ролью Viewer в нужной организации;
-#    5. ставит домашний дашборд организации (лендинг после входа).
+#    5. ставит домашний дашборд организации (лендинг после входа); для
+#       диспетчерской можно указать "home": "monitor" — тогда после входа
+#       открывается монитор-дашборд, а не обзор.
 #
 #  Требует python3 (только этот скрипт, сам стек его не использует).
 #
@@ -198,6 +201,19 @@ def validate_config(cfg: dict) -> None:
             die(f"{where}: location_filter должен быть непустой строкой или null "
                 f"(null или пропуск = без ограничения по location)")
 
+        # Монитор-дашборд — необязательный: по умолчанию группа получает
+        # только обзор, как раньше. Флаг включает вторую копию (большой экран).
+        monitor = g.get("monitor", False)
+        if not isinstance(monitor, bool):
+            die(f"{where}: monitor должен быть true или false")
+
+        home = g.get("home", "overview")
+        if home not in ("overview", "monitor"):
+            die(f"{where}: home должен быть 'overview' или 'monitor'")
+        if home == "monitor" and not monitor:
+            die(f"{where}: home = 'monitor', но monitor выключен — "
+                f"в организации не будет монитор-дашборда")
+
         users = g.get("users") or []
         if not isinstance(users, list):
             die(f"{where}: users должен быть списком")
@@ -239,44 +255,104 @@ def inject_location_filter(obj, regex: str, path: str = "$") -> int:
     return inject_label_filter(obj, "location", regex, path)
 
 
-def retarget_links(obj, old_uid: str, new_uid: str) -> int:
-    """Переписывает внутренние ссылки копии на неё саму: /d/<old> -> /d/<new>.
+def retarget_link_map(obj, mapping: dict, path: str = "$") -> int:
+    """Переписывает ссылки `/d/<uid>` по карте uid -> uid копии.
 
-    Копия дашборда живёт в отдельной организации группы, где дашборда с uid
-    базового (ups-overview) нет: без переадресации ссылка «Показать вкладку
-    этого ИБП» ведёт в никуда (Dashboard not found). Работает рекурсивно по
-    всему JSON — панельные data links, ссылки дашборда, ссылки на панели.
-    Возвращает число изменённых строк.
+    В организации группы нет ни одного базового дашборда, поэтому копии
+    должны ссылаться друг на друга: обзор -> монитор и монитор -> обзор.
+    Заменяем более длинные uid первыми, чтобы `ups-monitor` не испортил
+    уже переписанный `ups-monitor-<slug>`.
+    Работает рекурсивно по всему JSON — панельные data links, ссылки
+    дашборда, ссылки на панели.
     """
+    pairs = sorted(
+        ((str(old), str(new)) for old, new in mapping.items() if old and new and old != new),
+        key=lambda pair: len(pair[0]), reverse=True)
     changed = 0
-    old = f"/d/{old_uid}"
-    new = f"/d/{new_uid}"
     if isinstance(obj, dict):
         for key, val in obj.items():
-            if isinstance(val, str) and old in val:
-                obj[key] = val.replace(old, new)
-                changed += 1
+            if isinstance(val, str):
+                new = val
+                for old_uid, new_uid in pairs:
+                    new = new.replace(f"/d/{old_uid}", f"/d/{new_uid}")
+                if new != val:
+                    obj[key] = new
+                    changed += 1
             else:
-                changed += retarget_links(val, old_uid, new_uid)
+                changed += retarget_link_map(val, mapping, f"{path}.{key}")
     elif isinstance(obj, list):
-        for val in obj:
-            changed += retarget_links(val, old_uid, new_uid)
+        for i, val in enumerate(obj):
+            changed += retarget_link_map(val, mapping, f"{path}[{i}]")
     return changed
 
 
+def retarget_links(obj, old_uid: str, new_uid: str) -> int:
+    """Совместимость: переписать ссылки с одного uid на другой."""
+    return retarget_link_map(obj, {old_uid: new_uid})
+
+
+def drop_dashboard_links(dash: dict, uid: str) -> int:
+    """Убирает ссылки на дашборд `uid` из `links` (обычно — монитор).
+
+    Группе без монитора ссылка «Монитор» вела бы в Main Org, где её нет.
+    Удаляем только элементы списка `links` с таким uid, остальные ссылки
+    (включая ссылки на панели) не трогаем.
+    """
+    removed = 0
+
+    def walk(obj) -> None:
+        nonlocal removed
+        if isinstance(obj, dict):
+            for key, val in list(obj.items()):
+                if key == "links" and isinstance(val, list):
+                    kept = []
+                    for item in val:
+                        url = (item.get("url") or "") if isinstance(item, dict) else ""
+                        # uid целиком: /d/ups-monitor/ — это не /d/ups-monitor-2/
+                        if url.startswith(f"/d/{uid}/") or url.startswith(f"/d/{uid}?"):
+                            removed += 1
+                        else:
+                            kept.append(item)
+                    obj[key] = kept
+                else:
+                    walk(val)
+        elif isinstance(obj, list):
+            for val in obj:
+                walk(val)
+
+    walk(dash)
+    return removed
+
+
+def group_dashboard_uid(base_uid: str, slug: str) -> str:
+    """uid копии в организации группы.
+
+    Исторически обзор называется `ups-<slug>`; на него завязаны домашние
+    страницы и уже созданные организации. У остальных дашбордов uid
+    составляется из базового: `ups-monitor` -> `ups-monitor-<slug>`.
+    """
+    if not base_uid or base_uid == "ups-overview":
+        return f"ups-{slug}"
+    return f"{base_uid}-{slug}"
+
+
 def make_group_dashboard(base: dict, slug: str, title: str, regex=None,
-                         *, sites=None) -> tuple:
+                         *, sites=None, uid=None, uid_map=None) -> tuple:
     dash = json.loads(json.dumps(base))  # глубокая копия
     base_uid = dash.get("uid")
-    dash["uid"] = f"ups-{slug}"
+    dash["uid"] = uid or group_dashboard_uid(base_uid, slug)
     dash["title"] = title
     dash["id"] = None
     dash["version"] = 0
     if "meta" in dash:
         del dash["meta"]
-    # Ссылки на базовый дашборд -> на саму копию (в организации группы
-    # существует только она).
-    links = retarget_links(dash, base_uid, dash["uid"]) if base_uid else 0
+    # Ссылки на базовые дашборды -> на копии этой организации. uid_map
+    # передаётся, когда копий несколько (обзор + монитор): тогда каждая
+    # копия ссылается на свою пару, а не на Main Org.
+    mapping = dict(uid_map or {})
+    if base_uid:
+        mapping.setdefault(base_uid, dash["uid"])
+    links = retarget_link_map(dash, mapping) if mapping else 0
     # Доступ группы: список площадок и/или ручной regex по location.
     filters = group_filters({"sites": sites, "location_filter": regex})
     n = 0
@@ -371,6 +447,18 @@ def main() -> None:
     with open(base_path, encoding="utf-8") as fh:
         base_dash = json.load(fh)
 
+    # Монитор-дашборд нужен только группам с monitor=true. Если флаг ни у кого
+    # не включён, файл можно не читать: старые конфиги работают как раньше.
+    monitor_path = cfg.get("base_monitor", "grafana/dashboards/ups-monitor.json")
+    if not monitor_path.startswith("/"):
+        monitor_path = os.path.join(install_dir, monitor_path)
+    monitor_dash = None
+    if os.path.isfile(monitor_path):
+        with open(monitor_path, encoding="utf-8") as fh:
+            monitor_dash = json.load(fh)
+    elif any(g.get("monitor") for g in cfg["groups"]):
+        die(f"группе включён monitor, но нет файла {monitor_path}")
+
     api = Api(grafana_url, admin_user, admin_pass, args.dry_run)
     me = api.call("GET", "/api/user")
     if not me:
@@ -416,24 +504,44 @@ def main() -> None:
     step("Дашборды групп")
     for g in cfg["groups"]:
         filters = group_filters(g)
-        dash, replaced, links = make_group_dashboard(
-            base_dash, g["slug"], g["title"],
-            g.get("location_filter"), sites=g.get("sites"))
-        target_dir = os.path.join(install_dir, "grafana", "dashboards-groups", g["slug"])
-        target = os.path.join(target_dir, f"{dash['uid']}.json")
         matched = filter_matches(filters) if filters else None
-        note = (f"доступ: {describe_filters(filters)}, замен: {replaced}, "
-                f"ссылок на свою копию: {links}")
-        if matched is not None:
-            note += f", под фильтр попадает ИБП: {matched}"
-        if args.dry_run:
-            log(f"{g['org']}: {target} ({note})")
-        else:
-            os.makedirs(target_dir, exist_ok=True)
-            with open(target, "w", encoding="utf-8") as fh:
-                json.dump(dash, fh, ensure_ascii=False, indent=2)
-                fh.write("\n")
-            log(f"{g['org']}: {target} ({note})")
+        # Обзор есть у всех; монитор — только у групп с "monitor": true.
+        dashboards = [("overview", base_dash, g["title"])]
+        if g.get("monitor"):
+            dashboards.append((
+                "monitor", monitor_dash,
+                g.get("monitor_title") or f"{g['title']} — монитор"))
+        # Карта uid нужна заранее: копии ссылаются друг на друга
+        # (/d/ups-<slug>/ <-> /d/ups-monitor-<slug>/), а не на Main Org.
+        uid_map = {
+            base["uid"]: group_dashboard_uid(base["uid"], g["slug"])
+            for _, base, _ in dashboards if base.get("uid")
+        }
+        for kind, base, title in dashboards:
+            dash, replaced, links = make_group_dashboard(
+                base, g["slug"], title,
+                g.get("location_filter"), sites=g.get("sites"),
+                uid=uid_map[base["uid"]], uid_map=uid_map)
+            if kind == "monitor":
+                dash["tags"] = sorted(set(dash.get("tags", []) + ["monitor"]))
+            elif not g.get("monitor") and monitor_dash:
+                # Монитора у группы нет — убираем ссылки на него из обзора,
+                # иначе они ведут в Main Org, куда группе доступа нет.
+                drop_dashboard_links(dash, monitor_dash["uid"])
+            target_dir = os.path.join(install_dir, "grafana", "dashboards-groups", g["slug"])
+            target = os.path.join(target_dir, f"{dash['uid']}.json")
+            note = (f"{kind}: доступ: {describe_filters(filters)}, замен: {replaced}, "
+                    f"ссылок на копии: {links}")
+            if matched is not None:
+                note += f", под фильтр попадает ИБП: {matched}"
+            if args.dry_run:
+                log(f"{g['org']}: {target} ({note})")
+            else:
+                os.makedirs(target_dir, exist_ok=True)
+                with open(target, "w", encoding="utf-8") as fh:
+                    json.dump(dash, fh, ensure_ascii=False, indent=2)
+                    fh.write("\n")
+                log(f"{g['org']}: {target} ({note})")
         if matched == 0:
             log(f"    ! ВНИМАНИЕ: под фильтр {describe_filters(filters)} не попал ни один "
                 f"ИБП — проверьте метки site/location в targets.yml (regex в PromQL "
@@ -514,7 +622,10 @@ def main() -> None:
         log(f"    sudo python3 {os.path.basename(__file__)} --config {args.config}")
     else:
         for g in cfg["groups"]:
-            uid = f"ups-{g['slug']}"
+            if g.get("home", "overview") == "monitor" and monitor_dash:
+                uid = group_dashboard_uid(monitor_dash["uid"], g["slug"])
+            else:
+                uid = group_dashboard_uid(base_dash["uid"], g["slug"])
             if args.dry_run:
                 log(f"{g['org']}: БУДЕТ home = {uid}")
                 continue

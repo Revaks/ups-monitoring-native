@@ -4,6 +4,8 @@
     "Скопируйте в /root/groups.json (права 600) и поправьте под себя:",
     "  sites           — какие территории (площадки) видит группа;",
     "  location_filter — ручной фильтр по метке location, если нужна выборка сложнее целой площадки;",
+    "  monitor         — true: группе дополнительно кладётся дашборд «ИБП — монитор» для большого экрана;",
+    "  home            — 'overview' (по умолчанию) или 'monitor': что открывать после входа;",
     "  users           — кого завести (пароли скрипт сгенерирует сам и напечатает один раз).",
     "",
     "sites — список названий площадок ровно так, как они записаны в метке site в targets.yml.",
@@ -23,6 +25,7 @@
   "grafana_url": "http://localhost:3000",
   "datasource_url": null,
   "base_dashboard": "grafana/dashboards/ups-overview.json",
+  "base_monitor": "grafana/dashboards/ups-monitor.json",
 
   "groups": [
     {
@@ -31,6 +34,7 @@
       "title": "ИБП — инженерный обзор (весь парк)",
       "sites": null,
       "location_filter": null,
+      "monitor": false,
       "users": [
         {"login": "ivan.engineer", "name": "Иван Инженеров", "email": "ivan.engineer@example.local"}
       ]
@@ -40,6 +44,7 @@
       "slug": "electricians",
       "title": "ИБП — электрики (Площадка №1)",
       "sites": ["Площадка №1"],
+      "monitor": true,
       "users": [
         {"login": "elena.electric", "name": "Елена Электриков", "email": "elena.electric@example.local"}
       ]
@@ -49,6 +54,8 @@
       "slug": "operators",
       "title": "ИБП — страница смены (Площадка №1 и №2)",
       "sites": ["Площадка №1", "Площадка №2"],
+      "monitor": true,
+      "home": "monitor",
       "users": [
         {"login": "petr.operator", "name": "Пётр Операторов", "email": "petr.operator@example.local"}
       ]
@@ -58,6 +65,7 @@
       "slug": "lowvoltage",
       "title": "ИБП — слаботочные системы",
       "location_filter": "Слаботочн.*",
+      "monitor": true,
       "users": [
         {"login": "slava.lowvoltage", "name": "Слава Слаботочник", "email": "slava.lowvoltage@example.local"}
       ]

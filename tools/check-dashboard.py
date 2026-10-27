@@ -8,17 +8,21 @@
   2. раскладку `gridPos`: панель влезает в сетку (x + w <= 24) и соседние панели
      одного ряда не перекрываются (после удаления панели легко оставить дырку
      или наложение — в браузере это видно только глазами);
-  3. все панели, кроме `row`, ходят в разрешённые источники данных (по умолчанию
-     `prometheus`) — ловит «случайную» панель с `-- Grafana --` и Random Walk;
-  4. внутренние ссылки `/d/<uid>/…` указывают на существующий дашборд.
+  3. все панели, кроме `row`/`alertlist`, ходят в разрешённые источники данных
+     (по умолчанию `prometheus`) — ловит «случайную» панель с `-- Grafana --`
+     и Random Walk;
+  4. внутренние ссылки `/d/<uid>/…` указывают на существующий дашборд;
+  5. монитор — первый экран обзора в отдельном дашборде: 8 счётчиков,
+     «Требует внимания» с фиксированным размером текста, «Активные алерты»,
+     «Последний опрос ИБП», «Парк» и ссылка обратно на обзор.
 
 Дополнительно, если рядом лежит `grafana-groups.py`, для каждого дашборда
 собираются копии группы (`make_group_dashboard`) в двух вариантах доступа —
 ручной regex по `location` и список площадок (`site`) — и проверяются отдельно:
-копия живёт в своей организации, поэтому **все** ссылки в ней должны вести на
-неё саму, а не на базовый дашборд из Main Org, а фильтр доступа обязан попасть
-в каждое выражение с `job="snmp"` (пропущенное выражение = панель, показывающая
-чужую территорию).
+копии живут в своей организации, поэтому **все** ссылки в них должны вести на
+копии этой организации, а не на базовые дашборды из Main Org, а фильтр доступа
+обязан попасть в каждое выражение с `job="snmp"` (пропущенное выражение =
+панель, показывающая чужую территорию).
 
 Запуск: `python3 tools/check-dashboard.py` (из любого каталога — путь к репозиторию
 берётся от расположения скрипта). Ненулевой код возврата — есть проблемы.
@@ -164,25 +168,32 @@ GROUP_VARIANTS = (
 
 
 def check_one_copy(module, name: str, dash: dict, slug: str, regex, sites,
-                   errors: list) -> tuple:
+                   uid_map: dict, errors: list) -> tuple:
     """Собирает одну копию группы и проверяет её как отдельный дашборд."""
+    base_uid = dash.get("uid")
+    expected_uid = module.group_dashboard_uid(base_uid, slug)
     result = module.make_group_dashboard(
-        dash, slug, f"{dash.get('title')} ({slug})", regex, sites=sites)
+        dash, slug, f"{dash.get('title')} ({slug})", regex, sites=sites,
+        uid=expected_uid, uid_map=uid_map)
     # Старые версии скрипта возвращали (дашборд, число замен) без ссылок.
     copy, replaced = result[0], result[1]
     links = result[2] if len(result) > 2 else None
-    copy_name = f"{name} (копия ups-{slug})"
+    copy_name = f"{name} (копия {expected_uid})"
 
-    if copy.get("uid") != f"ups-{slug}":
-        errors.append(f"{copy_name}: uid копии {copy.get('uid')!r} вместо ups-{slug}")
+    if copy.get("uid") != expected_uid:
+        errors.append(f"{copy_name}: uid копии {copy.get('uid')!r} вместо {expected_uid!r}")
 
-    base_uid = dash.get("uid")
-    if base_uid:
-        left = sum(text.count(f"/d/{base_uid}") for text in iter_strings(copy))
+    # В организации группы нет ни одного базового дашборда: после копирования
+    # не должно остаться ссылок ни на обзор, ни на монитор из Main Org.
+    # Сравниваем uid целиком: `/d/ups-monitor/...` — префикс для
+    # `/d/ups-monitor-selfcheck/...`, простой count() дал бы ложную ошибку.
+    for old_uid in uid_map:
+        pattern = re.compile(rf"/d/{re.escape(old_uid)}(?:[/?]|$)")
+        left = sum(len(pattern.findall(text)) for text in iter_strings(copy))
         if left:
             errors.append(
-                f"{copy_name}: осталась ссылка на базовый дашборд /d/{base_uid}/ — "
-                f"в организации группы существует только сама копия"
+                f"{copy_name}: осталась ссылка на базовый дашборд /d/{old_uid}/ — "
+                f"в организации группы существуют только копии"
             )
 
     expected = count_marker(dash, 'job="snmp"')
@@ -204,7 +215,9 @@ def check_one_copy(module, name: str, dash: dict, slug: str, regex, sites,
             )
 
     check_container(copy_name, copy.get("panels") or [], errors)
-    check_links(copy_name, copy, {copy.get("uid")}, errors)
+    # Копии одной организации ссылаются друг на друга (обзор <-> монитор),
+    # поэтому разрешены все uid копий, а не только uid этой панели.
+    check_links(copy_name, copy, set(uid_map.values()), errors)
     return copy_name, links
 
 
@@ -213,11 +226,36 @@ def check_group_copies(module, dashes: dict, errors: list) -> int:
     checked = 0
     for name, dash in dashes.items():
         for label, slug, regex, sites in GROUP_VARIANTS:
+            # Карта uid строится по всем дашбордам сразу: копия монитора
+            # должна ссылаться на копию обзора этой же группы.
+            uid_map = {
+                d["uid"]: module.group_dashboard_uid(d["uid"], slug)
+                for d in dashes.values() if d.get("uid")
+            }
             copy_name, links = check_one_copy(
-                module, name, dash, slug, regex, sites, errors)
+                module, name, dash, slug, regex, sites, uid_map, errors)
             checked += 1
             if links is not None:
-                print(f"  {copy_name} [{label}]: ссылок переадресовано на свою копию — {links}")
+                print(f"  {copy_name} [{label}]: ссылок переадресовано на копии — {links}")
+
+    # Группа без монитора: обзор не должен ссылаться на монитор из Main Org.
+    monitor = dashes.get("ups-monitor.json")
+    overview = dashes.get("ups-overview.json")
+    if monitor and overview:
+        slug = "selfcheck-nomon"
+        uid_map = {
+            overview["uid"]: module.group_dashboard_uid(overview["uid"], slug)}
+        copy = module.make_group_dashboard(
+            overview, slug, "Обзор без монитора", None,
+            sites=["Площадка №1"], uid_map=uid_map)[0]
+        module.drop_dashboard_links(copy, monitor["uid"])
+        left = sum(len(re.findall(rf"/d/{re.escape(monitor['uid'])}[/?]",
+                                  text)) for text in iter_strings(copy))
+        if left:
+            errors.append(
+                "ups-overview.json (копия без монитора): осталась ссылка на "
+                "монитор из Main Org — группе она недоступна")
+        checked += 1
     return checked
 
 
@@ -291,6 +329,49 @@ def check_report(name: str, dash: dict, errors: list) -> None:
         )
 
 
+def check_monitor(name: str, dash: dict, errors: list) -> None:
+    """Монитор — первый экран обзора в отдельном дашборде, без «расплывания»."""
+    if dash.get("uid") != "ups-monitor":
+        return
+
+    panels = dash.get("panels") or []
+    stats = [p for p in panels if p.get("type") == "stat"]
+    if len(stats) != 8:
+        errors.append(
+            f"{name}: счётчиков {len(stats)}, ожидается 8 (5 показателей питания "
+            f"и связи, «Требует внимания», «Последний опрос», «Парк»)"
+        )
+
+    # «Требует внимания» — многорядная stat-плитка. Без фиксированного
+    # valueSize Grafana растягивает единственную проблему на всю панель.
+    problems = find_panel(panels, "Требует внимания")
+    if problems is None:
+        errors.append(f"{name}: нет панели «Требует внимания»")
+    else:
+        options = problems.get("options") or {}
+        size = (options.get("text") or {}).get("valueSize")
+        if problems.get("type") != "stat" or not isinstance(size, int) or size <= 0:
+            errors.append(
+                f"{name}: у «Требует внимания» нет фиксированного размера текста "
+                f"(options.text.valueSize) — одна проблема растянется на всю панель"
+            )
+
+    alerts = find_panel(panels, "Активные алерты")
+    if alerts is None or alerts.get("type") != "alertlist":
+        errors.append(f"{name}: нет панели «Активные алерты» (type=alertlist)")
+
+    last_poll = find_panel(panels, "Последний опрос ИБП")
+    if last_poll is None:
+        errors.append(f"{name}: нет панели «Последний опрос ИБП»")
+
+    fleet = find_panel(panels, "Парк")
+    if fleet is None:
+        errors.append(f"{name}: нет панели «Парк»")
+
+    if not any("/d/ups-overview/" in text for text in iter_strings(dash)):
+        errors.append(f"{name}: нет ссылки обратно на «ИБП — обзор»")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Семантические проверки дашбордов Grafana")
     ap.add_argument("--dir", default=str(REPO / "grafana" / "dashboards"),
@@ -327,7 +408,11 @@ def main() -> int:
         ids: dict = {}
         collect_ids(dash.get("panels") or [], ids, errors, name)
         panels_total += check_container(name, dash.get("panels") or [], errors)
-        check_report(name, dash, errors)
+        # «Отчёт за период» — требование обзора. У монитора другая задача:
+        # крупные показатели и список проблем, отчёт там не нужен.
+        if path.name == "ups-overview.json":
+            check_report(name, dash, errors)
+        check_monitor(name, dash, errors)
 
     for name, dash in dashes.items():
         links_total += check_links(name, dash, set(uids), errors)

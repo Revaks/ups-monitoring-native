@@ -779,7 +779,8 @@ print_summary() {
       "$SNMP_SHARDS" "$(shard_port 0)" "$(shard_port $((SNMP_SHARDS - 1)))"
   fi
   echo
-  echo "  Дашборд:    Grafana -> «ИБП — обзор»"
+  echo "  Дашборды:   Grafana -> «ИБП — обзор» и «ИБП — монитор»"
+  echo "              монитор для большого экрана: кнопки «Монитор» в шапке обзора"
   echo "  Алерты:     Grafana -> Alerting -> Alert rules (папка UPS)"
   if [ "$ALERTS_NOTIFICATIONS" = 1 ]; then
     echo "              уведомления: Telegram включён"

@@ -23,8 +23,8 @@
       "title": "Монитор · тёмная",
       "type": "link",
       "icon": "dashboard",
-      "tooltip": "Открывает экран для настенного монитора в новой вкладке: режим киоска, без переменных и выбора времени, обновление 30 с",
-      "url": "/d/ups-overview/ups-overview?orgId=1&kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=dark",
+      "tooltip": "Открывает отдельный дашборд «ИБП — монитор» в новой вкладке: режим киоска, без переменных и выбора времени, обновление 30 с",
+      "url": "/d/ups-monitor/ups-monitor?kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=dark",
       "targetBlank": true,
       "includeVars": true,
       "keepTime": false,
@@ -35,8 +35,8 @@
       "title": "Монитор · светлая",
       "type": "link",
       "icon": "dashboard",
-      "tooltip": "То же в светлой теме — для ярко освещённого помещения",
-      "url": "/d/ups-overview/ups-overview?orgId=1&kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=light",
+      "tooltip": "Открывает отдельный дашборд «ИБП — монитор» в новой вкладке: режим киоска, без переменных и выбора времени, обновление 30 с",
+      "url": "/d/ups-monitor/ups-monitor?kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=light",
       "targetBlank": true,
       "includeVars": true,
       "keepTime": false,
@@ -543,7 +543,10 @@
         },
         "showPercentChange": false,
         "textMode": "value_and_name",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "valueSize": 22
+        }
       },
       "targets": [
         {

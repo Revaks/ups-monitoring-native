@@ -1,0 +1,876 @@
+{
+  "uid": "ups-monitor",
+  "title": "ИБП — монитор",
+  "description": "Экран для настенного монитора: питание и связь, «Требует внимания», последний опрос, активные алерты и плитки парка. Открывается кнопками «Монитор» из обзора.",
+  "tags": [
+    "monitor",
+    "snmp",
+    "ups"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "graphTooltip": 0,
+  "editable": true,
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "site",
+        "label": "Площадка",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(up{job=\"snmp\"}, site)",
+        "definition": "label_values(up{job=\"snmp\"}, site)",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "description": "Территория. «All» — все площадки, доступные этой учётной записи. ИБП без метки site в targets.yml видны только при «All».",
+        "hide": 0
+      },
+      {
+        "name": "instance",
+        "label": "ИБП",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(up{job=\"snmp\", site=~\"$site\"}, instance)",
+        "definition": "label_values(up{job=\"snmp\", site=~\"$site\"}, instance)",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "description": "Какие вкладки-ИБП показывать. «All» — вкладка на каждый ИБП. Имя вкладки = instance: ups_name из targets.yml, иначе IP.",
+        "hide": 0
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "ИБП — обзор",
+      "type": "link",
+      "icon": "arrow-left",
+      "tooltip": "Вернуться к подробному дашборду",
+      "url": "/d/ups-overview/ups-overview",
+      "targetBlank": false,
+      "includeVars": true,
+      "keepTime": true,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "Монитор · тёмная",
+      "type": "link",
+      "icon": "dashboard",
+      "tooltip": "Тёмная тема для настенного монитора",
+      "url": "/d/ups-monitor/ups-monitor?kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=dark",
+      "targetBlank": true,
+      "includeVars": true,
+      "keepTime": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "Монитор · светлая",
+      "type": "link",
+      "icon": "dashboard",
+      "tooltip": "Светлая тема для ярко освещённого помещения",
+      "url": "/d/ups-monitor/ups-monitor?kiosk&_dash.hideTimePicker&_dash.hideVariables&refresh=30s&theme=light",
+      "targetBlank": true,
+      "includeVars": true,
+      "keepTime": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Питание и связь",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 1000,
+      "type": "stat",
+      "title": "От батареи",
+      "description": "Сколько ИБП сейчас питают нагрузку от батареи (upsOutputSource = 5). Серый ноль — все от сети; красный — авария.",
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#FF5B45",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short",
+          "displayName": "от батареи"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "count(upsOutputSource{job=\"snmp\", site=~\"$site\"} == 5) or vector(0)",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 1001,
+      "type": "stat",
+      "title": "Нет связи — новые за сутки",
+      "description": "ИБП, которые не отвечают по SNMP сейчас, но были на связи в последние 24 часа. Это то, на что стоит посмотреть: выключили, пропала сеть, сломалась карта.",
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 5,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B841",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short",
+          "displayName": "нет связи, новые"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "count((up{job=\"snmp\", site=~\"$site\"} == 0) and on (instance) (max_over_time(up{job=\"snmp\", site=~\"$site\"}[1d]) == 1)) or vector(0)",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 1002,
+      "type": "stat",
+      "title": "Давно без связи (больше суток)",
+      "description": "ИБП, которые не отвечают больше суток. Известная ситуация: приглушённый цвет, чтобы не заслонять новые проблемы. Список — в «Парке» и таблице «Состояние всех ИБП».",
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 10,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#5C4A1E",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short",
+          "displayName": "давно без связи"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "count((up{job=\"snmp\", site=~\"$site\"} == 0) unless on (instance) (max_over_time(up{job=\"snmp\", site=~\"$site\"}[1d]) == 1)) or vector(0)",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 1003,
+      "type": "stat",
+      "title": "На связи",
+      "description": "Сколько ИБП отвечают по SNMP и сколько всего перечислено в targets.yml.",
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 15,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "на связи"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "всего"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "count(up{job=\"snmp\", site=~\"$site\"} == 1) or vector(0)",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "count(up{job=\"snmp\", site=~\"$site\"}) or vector(0)",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 1004,
+      "type": "stat",
+      "title": "Мин. автономия",
+      "description": "ИБП с самым коротким расчётным временем работы от батареи (upsEstimatedMinutesRemaining). Меньше 10 минут — красный (как в алерте), меньше 20 — жёлтый.",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#FF5B45",
+                "value": null
+              },
+              {
+                "color": "#F5B841",
+                "value": 10
+              },
+              {
+                "color": "transparent",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "suffix: мин",
+          "displayName": "${__field.labels.instance}"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "bottomk(1, max by (instance) (upsEstimatedMinutesRemaining{job=\"snmp\", site=~\"$site\"}))",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 1005,
+      "type": "stat",
+      "title": "Требует внимания",
+      "description": "Только то, что нужно проверить сейчас: работа от батареи, низкий заряд, новое «нет связи» за сутки, перегрузка (> 85 %), перегрев (> 40 °C), байпас, тревога ИБП. Давние «нет связи» сюда не попадают. До 8 ИБП, важное — первым.",
+      "gridPos": {
+        "h": 7,
+        "w": 15,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "в норме",
+                  "color": "rgba(128, 128, 128, 0.16)",
+                  "index": 0
+                },
+                "10": {
+                  "text": "давно без связи",
+                  "color": "#5C4A1E",
+                  "index": 1
+                },
+                "21": {
+                  "text": "тревога ИБП",
+                  "color": "#F5B841",
+                  "index": 2
+                },
+                "22": {
+                  "text": "байпас",
+                  "color": "#F5B841",
+                  "index": 3
+                },
+                "23": {
+                  "text": "перегрев",
+                  "color": "#F5B841",
+                  "index": 4
+                },
+                "24": {
+                  "text": "перегрузка",
+                  "color": "#F5B841",
+                  "index": 5
+                },
+                "30": {
+                  "text": "нет связи",
+                  "color": "#F5B841",
+                  "index": 6
+                },
+                "40": {
+                  "text": "низкий заряд",
+                  "color": "#FF5B45",
+                  "index": 7
+                },
+                "50": {
+                  "text": "от батареи",
+                  "color": "#FF5B45",
+                  "index": 8
+                }
+              }
+            }
+          ],
+          "noValue": "новых проблем нет",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "displayName": "${__field.labels.instance} · ${__field.labels.site}"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "text": {
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "label_replace(sort_desc(topk(8, (\nmax by (instance, site) (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 5) * 0 + 50\nor max by (instance, site) (upsBatteryStatus{job=\"snmp\", site=~\"$site\"} >= 3) * 0 + 40\nor max by (instance, site) ((up{job=\"snmp\", site=~\"$site\"} == 0) and on (instance) (max_over_time(up{job=\"snmp\", site=~\"$site\"}[1d]) == 1)) * 0 + 30\nor max by (instance, site) (upsOutputPercentLoad{job=\"snmp\", site=~\"$site\"} > 85) * 0 + 24\nor max by (instance, site) (upsBatteryTemperature{job=\"snmp\", site=~\"$site\"} > 40) * 0 + 23\nor max by (instance, site) ((upsOutputSource{job=\"snmp\", site=~\"$site\"} == 4) or (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 9)) * 0 + 22\nor max by (instance, site) (upsAlarmsPresent{job=\"snmp\", site=~\"$site\"} > 0) * 0 + 21\n) > 0)), \"site\", \"без площадки\", \"site\", \"\")",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{instance}} · {{site}}"
+        }
+      ]
+    },
+    {
+      "id": 1006,
+      "type": "stat",
+      "title": "Последний опрос ИБП",
+      "description": "Сколько секунд назад Prometheus последний раз опрашивал ИБП. Жёлтый — больше 3 минут (опрос встал, цифры на экране могут быть устаревшими), красный — больше 10.",
+      "gridPos": {
+        "h": 3,
+        "w": 9,
+        "x": 15,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "нет данных",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B841",
+                "value": 180
+              },
+              {
+                "color": "#FF5B45",
+                "value": 600
+              }
+            ]
+          },
+          "unit": "suffix: с назад"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "time() - max(max_over_time(timestamp(up{job=\"snmp\", site=~\"$site\"})[1h:1m]))",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 1007,
+      "type": "alertlist",
+      "title": "Активные алерты",
+      "description": "Сработавшие правила алертов (папка UPS): что горит и с какого времени. Те же условия уходят в Telegram, если он включён.",
+      "gridPos": {
+        "h": 4,
+        "w": 9,
+        "x": 15,
+        "y": 12
+      },
+      "options": {
+        "alertInstanceLabelFilter": "",
+        "alertName": "",
+        "dashboardAlerts": false,
+        "groupBy": [],
+        "groupMode": "default",
+        "maxItems": 10,
+        "showInactiveAlerts": false,
+        "sortOrder": 1,
+        "stateFilter": {
+          "error": true,
+          "firing": true,
+          "noData": false,
+          "normal": false,
+          "pending": true
+        },
+        "viewMode": "list"
+      }
+    },
+    {
+      "id": 1008,
+      "type": "stat",
+      "title": "Парк",
+      "description": "Плитка на каждый ИБП. Цвет — состояние: серый — в норме, коричневый — давно без связи, жёлтый — новое «нет связи», перегрузка, перегрев, байпас или тревога, красный — от батареи или низкий заряд.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "в норме",
+                  "color": "rgba(128, 128, 128, 0.16)",
+                  "index": 0
+                },
+                "10": {
+                  "text": "давно без связи",
+                  "color": "#5C4A1E",
+                  "index": 1
+                },
+                "21": {
+                  "text": "тревога ИБП",
+                  "color": "#F5B841",
+                  "index": 2
+                },
+                "22": {
+                  "text": "байпас",
+                  "color": "#F5B841",
+                  "index": 3
+                },
+                "23": {
+                  "text": "перегрев",
+                  "color": "#F5B841",
+                  "index": 4
+                },
+                "24": {
+                  "text": "перегрузка",
+                  "color": "#F5B841",
+                  "index": 5
+                },
+                "30": {
+                  "text": "нет связи",
+                  "color": "#F5B841",
+                  "index": 6
+                },
+                "40": {
+                  "text": "низкий заряд",
+                  "color": "#FF5B45",
+                  "index": 7
+                },
+                "50": {
+                  "text": "от батареи",
+                  "color": "#FF5B45",
+                  "index": 8
+                }
+              }
+            }
+          ],
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "displayName": "${__field.labels.instance}"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "name",
+        "wideLayout": true,
+        "text": {
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sort_desc(\nmax by (instance, site) (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 5) * 0 + 50\nor max by (instance, site) (upsBatteryStatus{job=\"snmp\", site=~\"$site\"} >= 3) * 0 + 40\nor max by (instance, site) ((up{job=\"snmp\", site=~\"$site\"} == 0) and on (instance) (max_over_time(up{job=\"snmp\", site=~\"$site\"}[1d]) == 1)) * 0 + 30\nor max by (instance, site) (upsOutputPercentLoad{job=\"snmp\", site=~\"$site\"} > 85) * 0 + 24\nor max by (instance, site) (upsBatteryTemperature{job=\"snmp\", site=~\"$site\"} > 40) * 0 + 23\nor max by (instance, site) ((upsOutputSource{job=\"snmp\", site=~\"$site\"} == 4) or (upsOutputSource{job=\"snmp\", site=~\"$site\"} == 9)) * 0 + 22\nor max by (instance, site) (upsAlarmsPresent{job=\"snmp\", site=~\"$site\"} > 0) * 0 + 21\nor max by (instance, site) (up{job=\"snmp\", site=~\"$site\"} == 0) * 0 + 10\nor max by (instance, site) (up{job=\"snmp\", site=~\"$site\"}) * 0\n)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    }
+  ]
+}
