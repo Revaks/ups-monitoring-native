@@ -129,6 +129,15 @@ nano /root/groups.json
   "base_monitor": "grafana/dashboards/ups-monitor.json",
   "groups": [
     {
+      "org": "Диспетчерская",
+      "slug": "dispatch",
+      "title": "ИБП — диспетчерская (весь парк)",
+      "sites": null,
+      "monitor": true,
+      "home": "monitor",
+      "users": [{"login": "dispatcher", "name": "Дежурный Диспетчер", "email": "dispatcher@example.local"}]
+    },
+    {
       "org": "Инженеры",
       "slug": "engineers",
       "title": "ИБП — инженерный обзор (весь парк)",
@@ -137,21 +146,36 @@ nano /root/groups.json
       "users": [{"login": "ivan.engineer", "name": "Иван Инженеров", "email": "ivan@example.local"}]
     },
     {
-      "org": "Электрики",
-      "slug": "electricians",
-      "title": "ИБП — электрики (Площадка №1)",
-      "sites": ["Площадка №1"],
-      "monitor": true,
-      "users": [{"login": "elena.electric", "name": "Елена Электриков", "email": "elena@example.local"}]
-    },
-    {
       "org": "Операторы",
       "slug": "operators",
       "title": "ИБП — страница смены (Площадка №1 и №2)",
       "sites": ["Площадка №1", "Площадка №2"],
-      "monitor": true,
-      "home": "monitor",
+      "monitor": false,
       "users": [{"login": "petr.operator", "name": "Пётр Операторов", "email": "petr@example.local"}]
+    },
+    {
+      "org": "Служба ИТ",
+      "slug": "it",
+      "title": "ИБП — служба ИТ (ЦОД-1)",
+      "sites": ["ЦОД-1"],
+      "monitor": true,
+      "users": [{"login": "olga.it", "name": "Ольга ИТ", "email": "olga.it@example.local"}]
+    },
+    {
+      "org": "Служба Слаботочных систем",
+      "slug": "lowvoltage",
+      "title": "ИБП — служба слаботочных систем",
+      "location_filter": "Слаботочн.*",
+      "monitor": true,
+      "users": [{"login": "slava.lowvoltage", "name": "Слава Слаботочник", "email": "slava.lowvoltage@example.local"}]
+    },
+    {
+      "org": "Служба Электриков",
+      "slug": "electricians",
+      "title": "ИБП — служба электриков (Площадка №1)",
+      "sites": ["Площадка №1"],
+      "monitor": true,
+      "users": [{"login": "elena.electric", "name": "Елена Электрикова", "email": "elena.electric@example.local"}]
     }
   ]
 }

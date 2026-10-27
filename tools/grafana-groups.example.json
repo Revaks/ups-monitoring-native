@@ -12,7 +12,7 @@
     "Это точные значения, а не шаблоны: 'Площадка №1' и 'Площадка 1' — разные территории.",
     "Скрипт сам экранирует спецсимволы и проверяет по Prometheus, сколько ИБП попало под фильтр.",
     "Можно указать sites и location_filter вместе — тогда условия складываются (И то, И другое).",
-    "Ни sites, ни location_filter — группа видит весь парк (так удобно для инженеров).",
+    "Ни sites, ни location_filter — группа видит весь парк (так удобно для диспетчерской и инженеров).",
     "",
     "location_filter — регулярное выражение Prometheus. В PromQL оно анкорится целиком,",
     "поэтому для 'всех узлов КПП' нужно 'КПП.*', а не 'КПП'; для нескольких узлов — 'ЦОД-1|ЦОД-2'.",
@@ -29,6 +29,17 @@
 
   "groups": [
     {
+      "org": "Диспетчерская",
+      "slug": "dispatch",
+      "title": "ИБП — диспетчерская (весь парк)",
+      "sites": null,
+      "monitor": true,
+      "home": "monitor",
+      "users": [
+        {"login": "dispatcher", "name": "Дежурный Диспетчер", "email": "dispatcher@example.local"}
+      ]
+    },
+    {
       "org": "Инженеры",
       "slug": "engineers",
       "title": "ИБП — инженерный обзор (весь парк)",
@@ -40,34 +51,43 @@
       ]
     },
     {
-      "org": "Электрики",
-      "slug": "electricians",
-      "title": "ИБП — электрики (Площадка №1)",
-      "sites": ["Площадка №1"],
-      "monitor": true,
-      "users": [
-        {"login": "elena.electric", "name": "Елена Электриков", "email": "elena.electric@example.local"}
-      ]
-    },
-    {
       "org": "Операторы",
       "slug": "operators",
       "title": "ИБП — страница смены (Площадка №1 и №2)",
       "sites": ["Площадка №1", "Площадка №2"],
-      "monitor": true,
-      "home": "monitor",
+      "monitor": false,
       "users": [
         {"login": "petr.operator", "name": "Пётр Операторов", "email": "petr.operator@example.local"}
       ]
     },
     {
-      "org": "Слаботочные системы",
+      "org": "Служба ИТ",
+      "slug": "it",
+      "title": "ИБП — служба ИТ (ЦОД-1)",
+      "sites": ["ЦОД-1"],
+      "monitor": true,
+      "users": [
+        {"login": "olga.it", "name": "Ольга ИТ", "email": "olga.it@example.local"}
+      ]
+    },
+    {
+      "org": "Служба Слаботочных систем",
       "slug": "lowvoltage",
-      "title": "ИБП — слаботочные системы",
+      "title": "ИБП — служба слаботочных систем",
       "location_filter": "Слаботочн.*",
       "monitor": true,
       "users": [
         {"login": "slava.lowvoltage", "name": "Слава Слаботочник", "email": "slava.lowvoltage@example.local"}
+      ]
+    },
+    {
+      "org": "Служба Электриков",
+      "slug": "electricians",
+      "title": "ИБП — служба электриков (Площадка №1)",
+      "sites": ["Площадка №1"],
+      "monitor": true,
+      "users": [
+        {"login": "elena.electric", "name": "Елена Электрикова", "email": "elena.electric@example.local"}
       ]
     }
   ]
