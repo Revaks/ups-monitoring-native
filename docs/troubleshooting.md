@@ -176,6 +176,65 @@ ls /opt/ups-monitoring-native/grafana/provisioning/alerting/
 Частая причина — синтаксис YAML: проверьте файл (отступы, кавычки) и
 перезапустите: `sudo systemctl restart ups-monitoring`.
 
+## Дашборд группы не появляется: `Dashboard not found`
+
+В логе Grafana повторяется:
+
+```
+logger=provisioning.dashboard ... msg="failed to save dashboard"
+file=.../dashboards-groups/<slug>/ups-<slug>.json error="Dashboard not found"
+```
+
+Файл при этом на месте и валиден. Причина — запись в `dashboard_provisioning`:
+Grafana помнит числовой `dashboard_id` для каждого файла и перед сохранением
+подставляет его. Если сам дашборд удалили, а запись осталась, `GetDashboard`
+по этому id падает с `Dashboard not found`. Монитор при этом может
+провижиниться нормально, потому что его запись цела.
+
+Лечение: остановить стек, удалить битую запись `dashboard_provisioning`
+(только для файла, у которого `dashboard_id` не находится в `dashboard`),
+запустить стек. Файлы и остальные группы не трогаются.
+
+```bash
+sudo systemctl stop ups-monitoring
+
+sudo python3 - <<'PY'
+import glob, os, shutil, sqlite3, time
+
+target = '/lowvoltage/ups-lowvoltage.json'   # ← путь проблемного файла
+dbs = set(glob.glob('/var/lib/prometheus/ups-monitoring/**/grafana.db', recursive=True))
+dbs |= set(glob.glob('/opt/ups-monitoring-native/**/grafana.db', recursive=True))
+dbs = [p for p in dbs if os.path.isfile(p)]
+print('DB:', dbs)
+
+for db in dbs:
+    con = sqlite3.connect(db)
+    con.row_factory = sqlite3.Row
+    rows = con.execute('''
+        select p.id as prov_id, p.dashboard_id, p.external_id,
+               d.id as dash_id, d.uid, d.org_id, d.folder_id, d.deleted
+        from dashboard_provisioning p
+        left join dashboard d on d.id = p.dashboard_id
+        where p.external_id like ?
+    ''', ('%' + target,)).fetchall()
+    for r in rows:
+        print(' ', dict(r))
+    stale = [r['prov_id'] for r in rows if r['dash_id'] is None]
+    if stale:
+        backup = db + '.bak-' + time.strftime('%Y%m%d-%H%M%S')
+        shutil.copy2(db, backup)
+        con.executemany('delete from dashboard_provisioning where id = ?',
+                        [(i,) for i in stale])
+        con.commit()
+        print('deleted:', stale, 'backup:', backup)
+    else:
+        print('stale rows: none')
+    con.close()
+PY
+
+sudo systemctl start ups-monitoring
+```
+
 ## Опрос стал медленным, в логах таймауты
 
 ```bash
